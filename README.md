@@ -2,100 +2,144 @@
 <html lang="fr">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>CT241 - Commander du Cash</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CT241 - Logistics Hub</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-    <style>
-        :root { --gabon-vert: #009E60; --gabon-jaune: #FCD116; --gabon-bleu: #3A75C4; }
-        .bg-gabon-vert { background-color: var(--gabon-vert); }
-        .text-gabon-vert { color: var(--gabon-vert); }
-        .border-gabon-jaune { border-color: var(--gabon-jaune); }
-        #map { height: 280px; width: 100%; border-radius: 16px; margin-top: 12px; display: none; z-index: 10; border: 2px solid #e5e7eb; }
-        .pulse { animation: pulse-animation 2s infinite; }
-        @keyframes pulse-animation { 0% { opacity: 1; } 50% { opacity: 0.4; } 100% { opacity: 1; } }
-        input::-webkit-outer-spin-button, input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
-        .section { animation: fadeIn 0.3s ease-out; }
-        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
-    </style>
+    <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-database-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-storage-compat.js"></script>
 </head>
-<body class="bg-gray-50 text-gray-900 font-sans">
+<body class="bg-gray-100 font-sans">
 
-    <!-- HEADER -->
-    <header class="bg-white sticky top-0 z-50 shadow-sm border-b-4 border-gabon-jaune p-4 flex justify-between items-center">
-        <div class="flex items-center gap-2" onclick="location.reload()" style="cursor: pointer;">
-            <div class="w-10 h-10 bg-gabon-vert rounded-xl flex items-center justify-center text-white font-black shadow-sm">CT</div>
-            <div>
-                <h1 class="font-black text-xl leading-none tracking-tighter text-gray-800">CT241</h1>
-                <span class="text-[10px] font-bold text-gabon-vert uppercase tracking-widest">Gabon Cash</span>
-            </div>
-        </div>
-        <button onclick="showSection('suivi')" class="bg-blue-600 text-white px-5 py-2 rounded-full text-[11px] font-black uppercase shadow-md active:scale-90 transition-transform">Suivre</button>
-    </header>
+    <nav class="bg-blue-900 text-white p-4 shadow-lg flex justify-between items-center">
+        <h1 class="text-xl font-bold tracking-widest">CT241</h1>
+        <span id="userRole" class="bg-yellow-500 text-xs px-2 py-1 rounded text-blue-900 font-bold uppercase">Chargement...</span>
+    </nav>
 
-    <main class="max-w-md mx-auto p-4 pb-24">
-        
-        <!-- SECTION 1 : PASSER COMMANDE -->
-        <div id="sec-commander" class="section">
-            <div class="bg-white rounded-[2rem] shadow-2xl p-6 border border-gray-100 overflow-hidden relative">
-                <div class="absolute top-0 right-0 w-32 h-32 bg-gabon-vert opacity-5 rounded-full -mr-16 -mt-16"></div>
-                
-                <h2 class="text-2xl font-black mb-1 text-gray-800">Besoin de Cash ?</h2>
-                <p class="text-gray-400 text-[10px] mb-8 uppercase font-bold tracking-widest">Libreville • Akanda • Owendo</p>
+    <div class="max-w-4xl mx-auto p-4">
 
-                <div class="space-y-5">
-                    <div class="relative">
-                        <label class="text-[10px] font-black text-gray-400 uppercase mb-1 block ml-1">Nom complet</label>
-                        <input type="text" id="cNom" class="w-full p-4 bg-gray-50 border-2 border-gray-100 focus:border-green-500 rounded-2xl outline-none transition-all font-bold" placeholder="Ex: Jean-Marc">
+        <section id="rubrique1" class="hidden mb-6">
+            <div class="bg-white p-6 rounded-xl shadow-md border-t-4 border-green-500">
+                <h2 class="text-lg font-bold mb-4 text-green-700">📦 Création Mission (Point Relais)</h2>
+                <div class="space-y-4">
+                    <input type="text" id="clientNom" placeholder="Nom du Client" class="w-full p-2 border rounded">
+                    <div class="grid grid-cols-2 gap-2">
+                        <select id="relaisDepart" class="p-2 border rounded bg-gray-50">
+                            <option>Départ: Relais Nzeng-Ayong</option>
+                            <option>Départ: Relais Akanda</option>
+                            <option>Départ: Relais Louis</option>
+                        </select>
+                        <select id="relaisArrivee" class="p-2 border rounded bg-gray-50">
+                            <option>Arrivée: Relais Owendo</option>
+                            <option>Arrivée: Relais Akanda</option>
+                            <option>Arrivée: Domicile Client</option>
+                        </select>
                     </div>
-                    
-                    <div class="grid grid-cols-2 gap-4">
-                        <div class="relative">
-                            <label class="text-[10px] font-black text-gray-400 uppercase mb-1 block ml-1">Téléphone</label>
-                            <input type="tel" id="cTel" class="w-full p-4 bg-gray-50 border-2 border-gray-100 focus:border-green-500 rounded-2xl outline-none font-bold" placeholder="077...">
-                        </div>
-                        <div class="relative">
-                            <label class="text-[10px] font-black text-gray-400 uppercase mb-1 block ml-1">Quartier</label>
-                            <input type="text" id="cLieu" class="w-full p-4 bg-gray-50 border-2 border-gray-100 focus:border-green-500 rounded-2xl outline-none font-bold" placeholder="Lieu dit">
-                        </div>
-                    </div>
-
-                    <div class="relative">
-                        <label class="text-[10px] font-black text-gray-400 uppercase mb-1 block ml-1">Montant à recevoir</label>
-                        <div class="relative group">
-                            <input type="number" id="cMontant" oninput="calculerFrais()" class="w-full p-6 bg-gray-100 border-2 border-transparent focus:bg-white focus:border-green-500 rounded-3xl outline-none font-black text-3xl text-green-700 transition-all shadow-inner" placeholder="0">
-                            <span class="absolute right-6 top-7 text-gray-400 font-black">FCFA</span>
-                        </div>
-                    </div>
-
-                    <!-- BLOC RÉSUMÉ -->
-                    <div class="bg-gray-900 rounded-[1.5rem] p-6 text-white shadow-xl transform hover:scale-[1.02] transition-transform">
-                        <div class="flex justify-between text-[10px] font-bold text-gray-400 mb-3 uppercase tracking-tighter border-b border-gray-800 pb-2">
-                            <span>Service (190) + Livraison (1000)</span>
-                            <span class="text-blue-400">+ 1.190 F</span>
-                        </div>
-                        <div class="flex justify-between items-end">
-                            <span class="font-bold text-xs text-gray-400 uppercase">Total Final</span>
-                            <span id="totalDisplay" class="font-black text-3xl leading-none text-white tracking-tighter">0 F</span>
-                        </div>
-                    </div>
-
-                    <button onclick="validerCommande()" id="btnCommander" class="w-full bg-gabon-vert text-white font-black py-5 rounded-2xl shadow-xl active:scale-95 hover:brightness-110 transition-all text-xl mt-4 uppercase tracking-tighter">
-                        Valider la Commande
-                    </button>
+                    <button onclick="creerMission()" class="w-full bg-green-600 text-white py-3 rounded-lg font-bold">GÉNÉRER MANIFESTE & ID</button>
                 </div>
             </div>
-            
-            <div class="mt-8 flex justify-center gap-6 opacity-30 grayscale hover:grayscale-0 transition-all">
-                [Logo Airtel Money] [Logo Moov Money] [Logo CT241]
-            </div>
-        </div>
+        </section>
 
-        <!-- SECTION 2 : SUIVI GPS -->
-        <div id="sec-suivi" class="section hidden">
-            <div class="flex items-center justify-between mb-6">
-                <button onclick="showSection('commander')" class="bg-white p-3 rounded-full shadow-md text-gray-600 active:scale-90 transition-transform">
-                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M15 19l-7-7 7-7"></path></svg>
-                </button>
-                <h2 class="text-lg font-black text-gray-800 uppercase tracking-tighter">Mon Tracking</h2>
-                <div class="w-10"></div>
+        <section id="rubrique2" class="hidden mb-6">
+            <div class="bg-white p-6 rounded-xl shadow-md border-t-4 border-blue-600">
+                <h2 class="text-lg font-bold mb-4 text-blue-800">⚙️ Dispatch & Flux de Transfert</h2>
+                <div id="listeAttente" class="space-y-3">
+                    </div>
+            </div>
+        </section>
+
+        <section id="rubrique3" class="hidden mb-6">
+            <div class="bg-white p-6 rounded-xl shadow-md border-t-4 border-yellow-500">
+                <h2 class="text-lg font-bold mb-4 text-yellow-700">🏍️ Espace Livreur</h2>
+                <div class="bg-yellow-50 p-4 rounded border border-yellow-200 mb-4">
+                    <p class="text-sm font-bold">Mission Actuelle: <span id="idMissionCours">Aucune</span></p>
+                </div>
+                <label class="block mb-2 text-sm font-medium">Filmer le colis (Image compressée) :</label>
+                <input type="file" accept="image/*" capture="camera" id="photoColis" class="mb-4">
+                <button onclick="validerLivraison()" class="w-full bg-yellow-600 text-white py-3 rounded-lg font-bold">VALIDER LA LIVRAISON</button>
+            </div>
+        </section>
+
+        <section id="rubrique4" class="hidden">
+            <div class="bg-gray-800 p-6 rounded-xl shadow-md text-white">
+                <h2 class="text-lg font-bold mb-4">📂 Archives des Missions</h2>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left text-sm">
+                        <thead>
+                            <tr class="border-b border-gray-600">
+                                <th class="py-2">ID</th>
+                                <th>Trajet</th>
+                                <th>Statut</th>
+                            </tr>
+                        </thead>
+                        <tbody id="tableArchives">
+                            </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+    </div>
+
+    <script>
+        // CONFIGURATION FIREBASE
+        const firebaseConfig = {
+            apiKey: "VOTRE_API_KEY",
+            databaseURL: "VOTRE_DATABASE_URL",
+            storageBucket: "VOTRE_STORAGE_URL",
+            projectId: "VOTRE_PROJECT_ID"
+        };
+        firebase.initializeApp(firebaseConfig);
+        const db = firebase.database();
+        const storage = firebase.storage();
+
+        // SIMULATION DU RÔLE (À remplacer par l'auth réelle)
+        // Valeurs possibles: 'admin', 'gestionnaire', 'relais', 'livreur'
+        const currentUserRole = 'admin'; 
+
+        // GESTION DES ACCÈS
+        function controlerAcces() {
+            document.getElementById('userRole').innerText = currentUserRole;
+            
+            if (currentUserRole === 'relais' || currentUserRole === 'admin') {
+                document.getElementById('rubrique1').classList.remove('hidden');
+            }
+            if (currentUserRole === 'gestionnaire' || currentUserRole === 'admin') {
+                document.getElementById('rubrique2').classList.remove('hidden');
+                document.getElementById('rubrique4').classList.remove('hidden');
+            }
+            if (currentUserRole === 'livreur' || currentUserRole === 'admin') {
+                document.getElementById('rubrique3').classList.remove('hidden');
+            }
+        }
+
+        // CRÉATION DE MISSION (RUBRIQUE 1)
+        function creerMission() {
+            const idAuto = "CT-" + Math.floor(Math.random() * 900000 + 100000);
+            const mission = {
+                id: idAuto,
+                client: document.getElementById('clientNom').value,
+                depart: document.getElementById('relaisDepart').value,
+                arrivee: document.getElementById('relaisArrivee').value,
+                statut: 'en_attente',
+                date: new Date().toISOString()
+            };
+            db.ref('missions/' + idAuto).set(mission);
+            alert("Colis enregistré ! ID: " + idAuto);
+        }
+
+        // COMPRESSION ET UPLOAD PHOTO (RUBRIQUE 3)
+        async function validerLivraison() {
+            const file = document.getElementById('photoColis').files[0];
+            if(!file) return alert("Prenez une photo d'abord");
+
+            // Simulation de compression via Canvas (Logique interne)
+            const storageRef = storage.ref('preuves/' + Date.now() + '.jpg');
+            await storageRef.put(file);
+            alert("Livraison validée et photo archivée !");
+        }
+
+        window.onload = controlerAcces;
+    </script>
+</body>
+</html>
