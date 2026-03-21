@@ -28,7 +28,6 @@
         let currentUser = null;
         let userRole = null;
         let allMissions = [];
-        let searchTerm = "";
         let currentMissionId = null;
 
         // --- AUTHENTIFICATION ---
@@ -99,29 +98,43 @@
 
         // --- MISSIONS & STATS ---
         const prepareNextId = () => {
-            const id = "CT-" + Math.floor(Math.random() * 900000 + 100000);
+            const id = "2026-" + Math.floor(Math.random() * 900000 + 100000);
             document.getElementById('displayNextId').innerText = id;
             window.nextId = id;
         };
 
         window.genererMission = async () => {
             const fields = {
-                client: document.getElementById('clientNom').value,
-                telephone: document.getElementById('clientTel').value,
-                depart: document.getElementById('ptDepart').value,
-                arrivee: document.getElementById('ptArrivee').value,
-                contenu: document.getElementById('colisContenu').value,
-                service: document.getElementById('typeService').value,
-                prix: parseFloat(document.getElementById('prixLivraison').value) || 0
+                // Expéditeur
+                exp_nom: document.getElementById('expNom').value,
+                exp_quartier: document.getElementById('expQuartier').value,
+                exp_tel: document.getElementById('expTel').value,
+                // Destinataire
+                dest_nom: document.getElementById('destNom').value,
+                dest_quartier: document.getElementById('destQuartier').value,
+                dest_tel: document.getElementById('destTel').value,
+                // Colis & Paiement
+                nature: document.getElementById('natureColis').value,
+                valeur: parseFloat(document.getElementById('valeurDeclaree').value) || 0,
+                prix: parseFloat(document.getElementById('fraisLivraison').value) || 0,
+                reglement: document.getElementById('modeReglement').value,
             };
-            if (!fields.client || !fields.telephone) return showToast("Données incomplètes", "error");
+
+            if (!fields.exp_nom || !fields.dest_tel || !fields.prix) {
+                return showToast("Veuillez remplir les champs obligatoires", "error");
+            }
 
             try {
                 await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'missions', window.nextId), {
-                    ...fields, id: window.nextId, statut: 'en_attente', created_at: serverTimestamp(), creator_email: currentUser.email
+                    ...fields, 
+                    id: window.nextId, 
+                    statut: 'en_attente', 
+                    created_at: serverTimestamp(), 
+                    creator_email: currentUser.email
                 });
-                showToast("Colis enregistré !", "success");
-                ['clientNom', 'clientTel', 'colisContenu', 'prixLivraison'].forEach(id => document.getElementById(id).value = "");
+                showToast("Bon de livraison créé !", "success");
+                // Reset form
+                ['expNom', 'expQuartier', 'expTel', 'destNom', 'destQuartier', 'destTel', 'valeurDeclaree', 'fraisLivraison'].forEach(id => document.getElementById(id).value = "");
                 prepareNextId();
             } catch (e) { showToast("Erreur système", "error"); }
         };
@@ -237,19 +250,19 @@
                 const isMyColis = m.creator_email === currentUser.email;
                 if (m.statut === 'en_attente' && (userRole === 'admin' || userRole === 'dispatch')) {
                     containers.dispatch.innerHTML += `<div class="p-4 bg-white border border-slate-100 rounded-2xl mb-3 shadow-sm flex justify-between items-center">
-                        <div class="text-[11px]"><span class="font-black text-blue-600 block">${m.id}</span><b>${m.client}</b><br><span class="text-slate-400">${m.arrivee}</span></div>
+                        <div class="text-[11px]"><span class="font-black text-blue-600 block">${m.id}</span><b>${m.dest_nom}</b><br><span class="text-slate-400">${m.dest_quartier}</span></div>
                         <div class="flex gap-2">
-                            <button onclick="openManifeste('${m.id}')" class="bg-slate-100 text-slate-600 text-[9px] px-3 py-2 rounded-xl font-bold">MANIFESTE</button>
+                            <button onclick="openBonImpression('${m.id}')" class="bg-slate-100 text-slate-600 text-[9px] px-3 py-2 rounded-xl font-bold">BON</button>
                             <button onclick="publierMission('${m.id}')" class="bg-blue-600 text-white text-[10px] px-5 py-2 rounded-xl font-bold">DISPATCHER</button>
                         </div>
                     </div>`;
                 } else if (m.statut === 'publie' && (userRole === 'admin' || userRole === 'livreur')) {
                     containers.livreur.innerHTML += `<div class="p-5 bg-amber-50 border border-amber-200 rounded-3xl mb-4 space-y-3">
                         <div class="flex justify-between font-black items-center text-amber-700"><span>${m.id}</span><span class="text-[9px] bg-amber-500 text-white px-2 py-1 rounded-full uppercase">Disponible</span></div>
-                        <p class="text-[11px] text-amber-900"><b>Lieu:</b> ${m.arrivee}<br><b>Contact:</b> ${m.client} (${m.telephone})</p>
+                        <p class="text-[11px] text-amber-900"><b>Lieu:</b> ${m.dest_quartier}<br><b>Contact:</b> ${m.dest_nom} (${m.dest_tel})</p>
                         <div class="flex gap-2">
-                             <button onclick="openManifeste('${m.id}')" class="flex-1 bg-white border border-amber-200 text-amber-700 font-black py-4 rounded-2xl text-[10px]">MANIFESTE</button>
-                             <button onclick="openCamera('${m.id}')" class="flex-[2] bg-amber-500 text-white font-black py-4 rounded-2xl shadow-lg">VALIDER LIVRAISON</button>
+                             <button onclick="openBonImpression('${m.id}')" class="flex-1 bg-white border border-amber-200 text-amber-700 font-black py-4 rounded-2xl text-[10px]">REÇU COURSE</button>
+                             <button onclick="openCamera('${m.id}')" class="flex-[2] bg-amber-500 text-white font-black py-4 rounded-2xl shadow-lg">LIVRER</button>
                         </div>
                     </div>`;
                 }
@@ -258,7 +271,7 @@
                 if (canSeeArchive && m.statut === 'livre') {
                     containers.archives.innerHTML += `<tr class="border-b border-slate-800 text-[10px] hover:bg-slate-800 transition cursor-pointer" onclick="openArchiveDetail('${m.id}')">
                         <td class="p-4 font-bold text-white">${m.id}</td>
-                        <td class="p-4 text-slate-300"><b>${m.client}</b></td>
+                        <td class="p-4 text-slate-300"><b>${m.dest_nom}</b></td>
                         <td class="p-4 text-center"><span class="text-emerald-400 font-black">LIVRÉ</span></td>
                         <td class="p-4 text-right text-slate-400">${(m.prix || 0).toLocaleString()}</td>
                     </tr>`;
@@ -267,7 +280,7 @@
             document.getElementById('archiveCount').innerText = sorted.filter(m => m.statut === 'livre').length;
         };
 
-        window.openManifeste = (id) => {
+        window.openBonImpression = (id) => {
             const m = allMissions.find(x => x.id === id);
             if (!m) return;
             const now = new Date();
@@ -276,74 +289,83 @@
             
             document.getElementById('detailContent').innerHTML = `
                 <div class="print-area bg-white p-8 text-slate-900 font-serif">
-                    <div class="flex justify-between items-start border-b-4 border-slate-900 pb-4 mb-6">
-                        <div class="space-y-1">
+                    <div class="flex justify-between items-center border-b-4 border-slate-900 pb-4 mb-6">
+                        <div class="flex items-center gap-3">
+                            <img src="https://i.ibb.co/q3t8t3Rj/Gemini-Generated-Image-1pvtp31pvtp31pvt.png" class="h-12">
                             <h1 class="text-3xl font-black tracking-tighter">CT241</h1>
-                            <p class="text-[10px] uppercase font-bold bg-slate-900 text-white px-2 py-1 inline-block">Manifeste de Collecte Logistique</p>
                         </div>
-                        <div class="text-right text-[10px] uppercase font-bold">
-                            <p>Document N° : MAN-${m.id.split('-')[1]}</p>
-                            <p>Émis le : ${dateStr}</p>
+                        <div class="text-right">
+                             <h2 class="text-lg font-black uppercase">Bon de Livraison</h2>
+                             <p class="text-[10px] font-bold">N° Course : ${m.id} | Date : ${dateStr} | Heure : ${hourStr}</p>
                         </div>
                     </div>
 
-                    <div class="grid grid-cols-2 gap-8 mb-8 text-[11px]">
+                    <div class="space-y-6">
+                        <!-- SECTION 1 -->
                         <div class="space-y-2">
-                            <p><b>POINT RELAIS :</b> <span class="border-b border-dotted border-slate-400 pb-1">${m.depart || '....................'}</span></p>
-                            <p><b>QUARTIER :</b> <span class="border-b border-dotted border-slate-400 pb-1">${m.depart.split('(')[0] || '....................'}</span></p>
+                            <h3 class="bg-slate-100 p-1 text-[11px] font-black uppercase">1. INFORMATIONS EXPÉDITEUR (Client)</h3>
+                            <div class="grid grid-cols-1 gap-2 text-[12px] px-2">
+                                <p><b>Nom / Enseigne :</b> <span class="border-b border-slate-300 pb-1 flex-1">${m.exp_nom}</span></p>
+                                <div class="flex justify-between">
+                                    <p class="w-1/2"><b>Quartier :</b> <span class="border-b border-slate-300 pb-1">${m.exp_quartier}</span></p>
+                                    <p class="w-1/2"><b>Tél :</b> <span class="border-b border-slate-300 pb-1">${m.exp_tel}</span></p>
+                                </div>
+                            </div>
                         </div>
-                        <div class="space-y-2 text-right">
-                            <p><b>LIVREUR :</b> <span class="border-b border-dotted border-slate-400 pb-1">${userRole === 'livreur' ? currentUser.email.split('@')[0].toUpperCase() : '....................'}</span></p>
-                            <p><b>HEURE :</b> <span class="border-b border-dotted border-slate-400 pb-1">${hourStr}</span></p>
+
+                        <!-- SECTION 2 -->
+                        <div class="space-y-2">
+                            <h3 class="bg-slate-100 p-1 text-[11px] font-black uppercase">2. INFORMATIONS DESTINATAIRE (Réception)</h3>
+                            <div class="grid grid-cols-1 gap-2 text-[12px] px-2">
+                                <p><b>Nom :</b> <span class="border-b border-slate-300 pb-1">${m.dest_nom}</span></p>
+                                <p><b>Quartier de livraison :</b> <span class="border-b border-slate-300 pb-1">${m.dest_quartier}</span></p>
+                                <p><b>Téléphone :</b> <span class="border-b border-slate-300 pb-1">${m.dest_tel}</span></p>
+                            </div>
+                        </div>
+
+                        <!-- SECTION 3 -->
+                        <div class="space-y-2">
+                            <h3 class="bg-slate-100 p-1 text-[11px] font-black uppercase">3. DÉTAILS DU COLIS & PAIEMENT</h3>
+                            <div class="px-2 space-y-3">
+                                <div class="flex gap-4 text-[11px] font-bold">
+                                    <span>Nature :</span>
+                                    <span>[${m.nature === 'standard' ? 'X' : ' '}] Standard</span>
+                                    <span>[${m.nature === 'repas' ? 'X' : ' '}] Repas</span>
+                                    <span>[${m.nature === 'docs' ? 'X' : ' '}] Documents</span>
+                                    <span>[${m.nature === 'pharma' ? 'X' : ' '}] Pharma</span>
+                                </div>
+                                <div class="flex justify-between text-[12px]">
+                                    <p><b>Valeur déclarée :</b> ${m.valeur.toLocaleString()} FCFA</p>
+                                    <p><b>Frais Livraison :</b> <span class="text-lg font-black underline">${m.prix.toLocaleString()} FCFA</span></p>
+                                </div>
+                                <div class="flex gap-4 text-[10px] font-bold">
+                                    <span>Mode :</span>
+                                    <span>[${m.reglement === 'cash' ? 'X' : ' '}] Espèces (Cash)</span>
+                                    <span>[${m.reglement === 'airtel' ? 'X' : ' '}] Airtel Money</span>
+                                    <span>[${m.reglement === 'moov' ? 'X' : ' '}] Moov Money</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- SECTION 4 -->
+                        <div class="space-y-2">
+                            <h3 class="bg-slate-100 p-1 text-[11px] font-black uppercase">4. VALIDATION & SIGNATURE</h3>
+                            <div class="grid grid-cols-2 gap-10 mt-4 px-2">
+                                <div class="space-y-12">
+                                    <p class="text-[10px] font-bold border-b border-slate-400 pb-1">Livreur CT241 : ${m.livreur_email ? m.livreur_email.split('@')[0].toUpperCase() : '................'}</p>
+                                    <p class="text-[8px] italic text-slate-400">Signature Livreur</p>
+                                </div>
+                                <div class="space-y-12 border border-slate-200 p-4 rounded-xl text-center">
+                                    <p class="text-[9px] font-bold">Signature Réceptionnaire</p>
+                                    <p class="text-[7px] text-slate-400">(Confirme réception en bon état)</p>
+                                </div>
+                            </div>
                         </div>
                     </div>
 
-                    <table class="w-full border-collapse border border-slate-900 mb-8 text-[10px]">
-                        <thead>
-                            <tr class="bg-slate-100">
-                                <th class="border border-slate-900 p-2 text-left">N° COLIS (ID)</th>
-                                <th class="border border-slate-900 p-2 text-left">DESTINATION</th>
-                                <th class="border border-slate-900 p-2 text-center">ÉTAT (OK/S)</th>
-                                <th class="border border-slate-900 p-2 text-right">VALEUR (FCFA)</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <tr>
-                                <td class="border border-slate-900 p-3 font-bold">${m.id}</td>
-                                <td class="border border-slate-900 p-3">${m.arrivee}</td>
-                                <td class="border border-slate-900 p-3 text-center">OK</td>
-                                <td class="border border-slate-900 p-3 text-right font-black">${(m.prix || 0).toLocaleString()}</td>
-                            </tr>
-                            <!-- Lignes vides pour complétion manuelle si besoin -->
-                            <tr><td class="border border-slate-900 p-3 h-8"></td><td class="border border-slate-900 p-3"></td><td class="border border-slate-900 p-3"></td><td class="border border-slate-900 p-3"></td></tr>
-                        </tbody>
-                    </table>
-
-                    <div class="mb-10">
-                        <p class="text-[10px] font-bold">NOMBRE TOTAL DE COLIS : <span class="text-lg">01</span></p>
-                    </div>
-
-                    <div class="border-2 border-slate-900 p-4 rounded-lg mb-10">
-                        <h4 class="font-black text-[10px] uppercase mb-2 underline">Décharge de Responsabilité</h4>
-                        <p class="text-[9px] leading-relaxed italic">
-                            Je soussigné, livreur pour CT241, reconnaît avoir récupéré ce jour le(s) colis listé(s) ci-dessus en bon état apparent. 
-                            À compter de la signature de ce manifeste, la responsabilité du Point Relais est dégagée pour ces envois.
-                        </p>
-                    </div>
-
-                    <div class="grid grid-cols-2 gap-20 text-[10px] font-bold text-center">
-                        <div class="space-y-16">
-                            <p class="border-b border-slate-900 pb-2 uppercase">Signature Relais</p>
-                            <p class="text-[8px] text-slate-400">(Cachet Obligatoire)</p>
-                        </div>
-                        <div class="space-y-16">
-                            <p class="border-b border-slate-900 pb-2 uppercase">Signature Livreur CT241</p>
-                            <p class="text-[8px] text-slate-400">(Nom & Prénom)</p>
-                        </div>
-                    </div>
-
-                    <div class="mt-12 pt-4 border-t border-slate-100 text-center">
-                        <p class="text-[8px] text-slate-400 tracking-widest uppercase">CT241 LOGISTIQUE GABON - Document de Collecte Officiel</p>
+                    <div class="mt-10 pt-4 border-t-2 border-slate-900 text-center space-y-1">
+                        <p class="text-[10px] font-black italic">Note : En cas de problème, contactez le service client CT241.</p>
+                        <p class="text-[9px] font-bold tracking-widest uppercase">MERCI DE VOTRE CONFIANCE !</p>
                     </div>
                 </div>`;
             document.getElementById('detailModal').classList.remove('hidden');
@@ -359,10 +381,10 @@
                         <div class="text-right font-black text-xl text-emerald-600">${m.id}</div>
                     </div>
                     <div class="grid grid-cols-2 gap-4 text-xs">
-                        <div class="p-3 bg-slate-50 rounded-xl"><p class="text-[8px] text-slate-400 uppercase font-black">Expéditeur</p><b>${m.client}</b></div>
+                        <div class="p-3 bg-slate-50 rounded-xl"><p class="text-[8px] text-slate-400 uppercase font-black">Expéditeur</p><b>${m.exp_nom}</b></div>
                         <div class="p-3 bg-slate-50 rounded-xl"><p class="text-[8px] text-slate-400 uppercase font-black">Livreur</p><b>${m.livreur_email || 'Non assigné'}</b></div>
                     </div>
-                    ${m.photoUrl ? `<img src="${m.photoUrl}" class="w-full h-48 object-cover rounded-2xl border-4 border-slate-100">` : '<div class="h-20 flex items-center justify-center text-slate-300 italic text-[10px]">Photo non disponible</div>'}
+                    ${m.photoUrl ? `<img src="${m.photoUrl}" class="w-full h-48 object-cover rounded-2xl border-4 border-slate-100">` : '<div class="h-20 flex items-center justify-center text-slate-300 italic text-[10px]">Preuve photo non disponible</div>'}
                     <div class="text-center font-black text-2xl py-2">${(m.prix || 0).toLocaleString()} CFA</div>
                 </div>`;
             document.getElementById('detailModal').classList.remove('hidden');
@@ -386,6 +408,7 @@
             .print-area { position: fixed; left: 0; top: 0; width: 100%; margin: 0; padding: 20px; }
             .no-print { display: none !important; }
         }
+        input::placeholder { color: #cbd5e1; font-weight: normal; }
     </style>
 </head>
 <body class="min-h-screen">
@@ -461,22 +484,67 @@
             <!-- BOUTIQUE : RECEPTION -->
             <section id="rubrique1" class="role-section hidden">
                 <div class="bg-white rounded-[2.5rem] shadow-xl border border-slate-100 overflow-hidden">
-                    <div class="bg-emerald-600 p-6 text-white flex justify-between items-center"><h2 class="font-black text-xs uppercase">Enregistrement Colis</h2><span id="displayNextId" class="text-[10px] font-mono font-black bg-white/20 px-3 py-1 rounded-lg">...</span></div>
-                    <div class="p-6 space-y-4">
-                        <div class="grid grid-cols-2 gap-3">
-                            <input type="text" id="clientNom" placeholder="Nom Expéditeur" class="p-4 bg-slate-50 rounded-2xl font-bold text-[10px] outline-none border border-transparent focus:border-emerald-500">
-                            <input type="tel" id="clientTel" placeholder="Téléphone" class="p-4 bg-slate-50 rounded-2xl font-bold text-[10px] outline-none border border-transparent focus:border-emerald-500">
+                    <div class="bg-emerald-600 p-6 text-white flex justify-between items-center">
+                        <div>
+                            <p class="text-[10px] font-black uppercase tracking-widest opacity-70">📦 Bon de Livraison</p>
+                            <h2 class="font-black text-xs uppercase">Course : <span id="displayNextId">...</span></h2>
                         </div>
-                        <textarea id="colisContenu" placeholder="Nature du colis..." class="w-full p-4 bg-slate-50 rounded-2xl font-bold text-[10px] outline-none min-h-[80px] border border-transparent focus:border-emerald-500"></textarea>
-                        <div class="grid grid-cols-2 gap-3">
-                            <select id="ptDepart" class="p-4 bg-slate-50 rounded-2xl font-black text-[10px] outline-none"><option>Libreville (Relais)</option><option>Akanda</option></select>
-                            <select id="ptArrivee" class="p-4 bg-slate-50 rounded-2xl font-black text-[10px] outline-none"><option>Libreville (Client)</option><option>Owendo</option><option>Ntoum</option></select>
+                    </div>
+                    
+                    <div class="p-6 space-y-8">
+                        <!-- EXPEDITEUR -->
+                        <div class="space-y-3">
+                            <p class="text-[9px] font-black text-emerald-600 uppercase border-l-4 border-emerald-600 pl-2">1. INFORMATIONS EXPÉDITEUR</p>
+                            <input type="text" id="expNom" placeholder="Nom / Enseigne (Client)" class="w-full p-4 bg-slate-50 rounded-2xl font-bold text-[11px] outline-none border border-transparent focus:border-emerald-500">
+                            <div class="grid grid-cols-2 gap-3">
+                                <input type="text" id="expQuartier" placeholder="Quartier" class="p-4 bg-slate-50 rounded-2xl font-bold text-[11px] outline-none border border-transparent focus:border-emerald-500">
+                                <input type="tel" id="expTel" placeholder="Téléphone" class="p-4 bg-slate-50 rounded-2xl font-bold text-[11px] outline-none border border-transparent focus:border-emerald-500">
+                            </div>
                         </div>
-                        <div class="grid grid-cols-2 gap-3">
-                            <select id="typeService" class="p-4 bg-slate-50 rounded-2xl font-black text-[10px] outline-none"><option value="standard">Standard</option><option value="express">Express</option></select>
-                            <input type="number" id="prixLivraison" placeholder="Montant (CFA)" class="p-4 bg-slate-50 rounded-2xl font-bold text-[10px] outline-none border border-transparent focus:border-emerald-500">
+
+                        <!-- DESTINATAIRE -->
+                        <div class="space-y-3">
+                            <p class="text-[9px] font-black text-emerald-600 uppercase border-l-4 border-emerald-600 pl-2">2. INFORMATIONS DESTINATAIRE</p>
+                            <input type="text" id="destNom" placeholder="Nom du destinataire" class="w-full p-4 bg-slate-50 rounded-2xl font-bold text-[11px] outline-none border border-transparent focus:border-emerald-500">
+                            <div class="grid grid-cols-2 gap-3">
+                                <select id="destQuartier" class="p-4 bg-slate-50 rounded-2xl font-bold text-[11px] outline-none">
+                                    <option value="" disabled selected>Quartier de livraison</option>
+                                    <option>Angondjé</option>
+                                    <option>Nzeng-Ayong</option>
+                                    <option>Oloumi</option>
+                                    <option>Owendo</option>
+                                    <option>Akanda</option>
+                                    <option>Ntoum</option>
+                                </select>
+                                <input type="tel" id="destTel" placeholder="Tél Destinataire" class="p-4 bg-slate-50 rounded-2xl font-bold text-[11px] outline-none border border-transparent focus:border-emerald-500">
+                            </div>
                         </div>
-                        <button onclick="genererMission()" class="w-full bg-emerald-600 text-white font-black py-5 rounded-2xl shadow-lg active:scale-95 transition text-xs">CRÉER LA MISSION</button>
+
+                        <!-- DETAILS COLIS -->
+                        <div class="space-y-3">
+                            <p class="text-[9px] font-black text-emerald-600 uppercase border-l-4 border-emerald-600 pl-2">3. DÉTAILS DU COLIS & PAIEMENT</p>
+                            <div class="grid grid-cols-2 gap-3">
+                                <select id="natureColis" class="p-4 bg-slate-50 rounded-2xl font-bold text-[11px] outline-none">
+                                    <option value="standard">📦 Standard</option>
+                                    <option value="repas">🍔 Repas</option>
+                                    <option value="docs">📄 Documents</option>
+                                    <option value="pharma">💊 Pharma</option>
+                                </select>
+                                <select id="modeReglement" class="p-4 bg-slate-50 rounded-2xl font-bold text-[11px] outline-none">
+                                    <option value="cash">Espèces (Cash)</option>
+                                    <option value="airtel">Airtel Money</option>
+                                    <option value="moov">Moov Money</option>
+                                </select>
+                            </div>
+                            <div class="grid grid-cols-2 gap-3">
+                                <input type="number" id="valeurDeclaree" placeholder="Valeur déclarée (CFA)" class="p-4 bg-slate-50 rounded-2xl font-bold text-[11px] outline-none border border-transparent focus:border-emerald-500">
+                                <input type="number" id="fraisLivraison" placeholder="Frais Livraison (CFA)" class="p-4 bg-slate-100 rounded-2xl font-black text-[11px] outline-none border-2 border-emerald-600">
+                            </div>
+                        </div>
+
+                        <button onclick="genererMission()" class="w-full bg-emerald-600 text-white font-black py-5 rounded-3xl shadow-xl active:scale-95 transition-all text-[11px] uppercase tracking-widest">
+                            CRÉER LE BON DE LIVRAISON
+                        </button>
                     </div>
                 </div>
             </section>
@@ -498,20 +566,25 @@
                 <div class="bg-slate-900 rounded-[2.5rem] overflow-hidden shadow-2xl">
                     <div class="p-6 flex justify-between items-center"><h2 class="text-white font-black text-xs uppercase">Historique Livraisons</h2><div id="archiveCount" class="bg-yellow-500 text-slate-900 font-black text-[9px] px-3 py-1 rounded-full">0</div></div>
                     <div class="overflow-x-auto">
-                        <table class="w-full text-left"><thead class="bg-white/5 text-slate-500 text-[8px] uppercase font-black"><tr><th class="p-4">ID</th><th class="p-4">Client</th><th class="p-4 text-center">Statut</th><th class="p-4 text-right">CFA</th></tr></thead><tbody id="archiveBody"></tbody></table>
+                        <table class="w-full text-left">
+                            <thead class="bg-white/5 text-slate-500 text-[8px] uppercase font-black">
+                                <tr><th class="p-4">ID</th><th class="p-4">Client</th><th class="p-4 text-center">Statut</th><th class="p-4 text-right">CFA</th></tr>
+                            </thead>
+                            <tbody id="archiveBody"></tbody>
+                        </table>
                     </div>
                 </div>
             </section>
         </div>
     </main>
 
-    <!-- MODAL DETAIL / MANIFESTE -->
+    <!-- MODAL DETAIL / IMPRESSION -->
     <div id="detailModal" class="fixed inset-0 bg-slate-950/90 z-[400] hidden flex items-center justify-center p-4">
         <div class="w-full max-w-2xl bg-white rounded-[2.5rem] shadow-2xl overflow-y-auto max-h-[90vh] animate-in zoom-in duration-200">
             <div id="detailContent"></div>
             <div class="p-6 bg-slate-50 flex gap-2 no-print">
-                <button onclick="window.print()" class="flex-1 bg-slate-900 text-white font-black py-4 rounded-2xl text-[10px]">📑 IMPRIMER MANIFESTE</button>
-                <button onclick="document.getElementById('detailModal').classList.add('hidden')" class="px-6 bg-slate-200 text-slate-600 font-black py-4 rounded-2xl text-[10px]">RETOUR</button>
+                <button onclick="window.print()" class="flex-1 bg-slate-900 text-white font-black py-4 rounded-2xl text-[10px]">🖨️ IMPRIMER LE BON</button>
+                <button onclick="document.getElementById('detailModal').classList.add('hidden')" class="px-6 bg-slate-200 text-slate-600 font-black py-4 rounded-2xl text-[10px]">FERMER</button>
             </div>
         </div>
     </div>
@@ -520,10 +593,10 @@
     <div id="cameraModal" class="fixed inset-0 bg-black z-[300] hidden flex flex-col items-center justify-center p-8 text-white">
         <div class="text-center space-y-8">
             <div class="text-6xl">📸</div>
-            <h2 class="text-2xl font-black">Photo Obligatoire</h2>
+            <h2 class="text-2xl font-black">Preuve de Livraison</h2>
             <input type="file" id="fileInput" accept="image/*" capture="camera" class="hidden" onchange="processImage(this.files[0])">
-            <button onclick="document.getElementById('fileInput').click()" class="w-full bg-white text-black font-black py-5 rounded-3xl shadow-2xl">PRENDRE LA PHOTO</button>
-            <button onclick="document.getElementById('cameraModal').classList.add('hidden')" class="text-slate-500 text-[10px] font-bold uppercase">Annuler</button>
+            <button onclick="document.getElementById('fileInput').click()" class="w-full bg-white text-black font-black py-5 rounded-3xl shadow-2xl uppercase tracking-widest text-xs">Ouvrir l'appareil</button>
+            <button onclick="document.getElementById('cameraModal').classList.add('hidden')" class="text-slate-500 text-[10px] font-bold uppercase underline">Annuler</button>
         </div>
     </div>
 
