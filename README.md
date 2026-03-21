@@ -35,6 +35,7 @@
         let currentRole = 'admin';
         let currentMissionId = null;
         let nextGeneratedId = "";
+        let allMissions = [];
 
         // --- AUTHENTIFICATION ---
         window.handleLogin = async (e) => {
@@ -211,10 +212,69 @@
             onSnapshot(q, (snapshot) => {
                 const missions = [];
                 snapshot.forEach(doc => missions.push(doc.data()));
+                allMissions = missions;
                 renderUI(missions);
             }, (error) => {
                 console.error("Erreur Firestore:", error);
             });
+        };
+
+        window.openArchiveDetail = (id) => {
+            const m = allMissions.find(x => x.id === id);
+            if (!m) return;
+            
+            const detailContent = document.getElementById('detailContent');
+            detailContent.innerHTML = `
+                <div class="print-area bg-white p-6 space-y-4 text-slate-900 border-2 border-slate-100 rounded-3xl">
+                    <div class="flex justify-between items-start border-b-2 border-slate-100 pb-4">
+                        <div>
+                            <img src="https://i.ibb.co/q3t8t3Rj/Gemini-Generated-Image-1pvtp31pvtp31pvt.png" class="h-10 mb-2">
+                            <h2 class="text-xl font-black">REÇU DE LIVRAISON</h2>
+                            <p class="text-[10px] text-slate-400 font-bold uppercase">Preuve de Service CT241</p>
+                        </div>
+                        <div class="text-right">
+                            <span class="text-lg font-black font-mono text-emerald-600">${m.id}</span>
+                            <p class="text-[10px] text-slate-400">${new Date(m.livre_le).toLocaleString()}</p>
+                        </div>
+                    </div>
+                    
+                    <div class="grid grid-cols-2 gap-4 text-xs">
+                        <div class="p-3 bg-slate-50 rounded-xl">
+                            <p class="font-black uppercase text-[8px] text-slate-400 mb-1">Expéditeur</p>
+                            <p class="font-bold">${m.client}</p>
+                            <p class="text-[10px]">${m.telephone}</p>
+                        </div>
+                        <div class="p-3 bg-slate-50 rounded-xl">
+                            <p class="font-black uppercase text-[8px] text-slate-400 mb-1">Trajet</p>
+                            <p class="font-bold">${m.depart} → ${m.arrivee}</p>
+                            <p class="text-[10px] uppercase">${m.service}</p>
+                        </div>
+                    </div>
+
+                    <div class="p-3 border-2 border-slate-50 rounded-xl space-y-2">
+                        <p class="font-black uppercase text-[8px] text-slate-400">Détails Colis</p>
+                        <p class="text-xs">${m.contenu || 'Aucune description'}</p>
+                        <div class="flex justify-between items-center pt-2 border-t border-slate-50">
+                            <span class="font-bold">Total Réglé:</span>
+                            <span class="font-black text-sm">${m.prix || '0'} FCFA</span>
+                        </div>
+                    </div>
+
+                    <div class="space-y-2">
+                        <p class="font-black uppercase text-[8px] text-slate-400">Photo de Confirmation</p>
+                        <img src="${m.photoUrl}" class="w-full h-48 object-cover rounded-2xl border-2 border-slate-100">
+                    </div>
+
+                    <div class="text-center pt-4 border-t border-slate-100 italic text-[9px] text-slate-400">
+                        Merci de votre confiance. Pour toute réclamation, munissez-vous de cet identifiant.
+                    </div>
+                </div>
+            `;
+            document.getElementById('detailModal').classList.remove('hidden');
+        };
+
+        window.printCurrentArchive = () => {
+            window.print();
         };
 
         const renderUI = (missions) => {
@@ -251,11 +311,11 @@
                     </div>`;
                 } else if (m.statut === 'livre') {
                     arcCount++;
-                    containers.archives.innerHTML += `<tr class="border-b border-slate-700 text-[10px]">
-                        <td class="p-3 text-yellow-500 font-bold">${m.id}</td>
-                        <td class="p-3">${m.client}<br><span class="text-slate-500">${m.arrivee}</span></td>
-                        <td class="p-3"><img src="${m.photoUrl}" class="w-10 h-10 rounded-lg object-cover cursor-pointer" onclick="window.open('${m.photoUrl}')"></td>
-                        <td class="p-3 text-slate-500">${new Date(m.livre_le).toLocaleDateString()}</td>
+                    containers.archives.innerHTML += `<tr class="border-b border-slate-700 text-[10px] hover:bg-slate-800 transition cursor-pointer" onclick="openArchiveDetail('${m.id}')">
+                        <td class="p-4 text-yellow-500 font-bold">${m.id}</td>
+                        <td class="p-4">${m.client}<br><span class="text-slate-500">${m.arrivee}</span></td>
+                        <td class="p-4"><img src="${m.photoUrl}" class="w-8 h-8 rounded-lg object-cover"></td>
+                        <td class="p-4 text-slate-500">${new Date(m.livre_le).toLocaleDateString()}</td>
                     </tr>`;
                 }
             });
@@ -277,6 +337,20 @@
         .logo-img { max-height: 44px; width: auto; }
         .logo-login { max-height: 140px; width: auto; margin: 0 auto; }
         input, select, textarea { appearance: none; }
+
+        @media print {
+            body * { visibility: hidden; }
+            .print-area, .print-area * { visibility: visible; }
+            .print-area { 
+                position: fixed; 
+                left: 0; 
+                top: 0; 
+                width: 100%; 
+                border: none !important; 
+                padding: 0 !important;
+            }
+            .no-print { display: none !important; }
+        }
     </style>
 </head>
 <body class="bg-slate-50 min-h-screen">
@@ -313,7 +387,7 @@
 
     <!-- CONTENU APPLICATION -->
     <main id="appContent" class="hidden pb-24">
-        <nav class="bg-white text-slate-900 p-3 shadow-md sticky top-0 z-50 border-b border-slate-100">
+        <nav class="bg-white text-slate-900 p-3 shadow-md sticky top-0 z-50 border-b border-slate-100 no-print">
             <div class="max-w-xl mx-auto flex justify-between items-center">
                 <div class="flex items-center gap-3">
                     <img src="https://i.ibb.co/q3t8t3Rj/Gemini-Generated-Image-1pvtp31pvtp31pvt.png" alt="Logo CT241" class="logo-img">
@@ -337,7 +411,7 @@
             <div class="max-w-xl mx-auto mt-2 flex justify-end" id="badgeDisplay"></div>
         </nav>
 
-        <div class="max-w-xl mx-auto p-4 space-y-6 mt-4">
+        <div class="max-w-xl mx-auto p-4 space-y-6 mt-4 no-print">
             <!-- SECTION RELAIS : FORMULAIRE ENRICHI -->
             <section id="rubrique1" class="role-section">
                 <div class="bg-white rounded-[2.5rem] shadow-xl border border-slate-100 overflow-hidden">
@@ -356,7 +430,6 @@
                     </div>
                     
                     <div class="p-8 space-y-5">
-                        <!-- Champ ID Visible mais verrouillé -->
                         <div class="space-y-1">
                             <label class="text-[10px] font-black text-slate-400 uppercase ml-2 tracking-widest">Identifiant de suivi (Généré)</label>
                             <input type="text" id="visibleIdInput" readonly class="w-full p-4 bg-slate-100 rounded-2xl font-black text-sm border-2 border-slate-200 text-slate-500 outline-none cursor-not-allowed font-mono">
@@ -417,7 +490,7 @@
                         </div>
 
                         <button onclick="genererMission()" class="w-full bg-emerald-600 text-white font-black py-5 rounded-[1.5rem] shadow-xl hover:bg-emerald-700 transition-all active:scale-[0.98] mt-4 flex items-center justify-center gap-2 tracking-tighter">
-                            <span>🚀</span> ENREGISTRER LE COLIS <span id="btnIdRef" class="opacity-50 text-[10px] ml-1"></span>
+                            <span>🚀</span> ENREGISTRER LE COLIS
                         </button>
                     </div>
                 </div>
@@ -459,6 +532,22 @@
             </section>
         </div>
     </main>
+
+    <!-- MODAL DETAIL / IMPRESSION ARCHIVE -->
+    <div id="detailModal" class="fixed inset-0 bg-slate-950/80 z-[400] hidden flex items-center justify-center p-4">
+        <div class="w-full max-w-lg bg-white rounded-[2.5rem] shadow-2xl overflow-hidden animate-in slide-in-from-bottom-10 duration-300">
+            <div id="detailContent" class="p-2">
+                <!-- Injecté via JS -->
+            </div>
+            <div class="p-6 bg-slate-50 flex gap-3 no-print">
+                <button onclick="printCurrentArchive()" class="flex-1 bg-slate-900 text-white font-black py-4 rounded-2xl flex items-center justify-center gap-2">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" /></svg>
+                    IMPRIMER LE REÇU
+                </button>
+                <button onclick="document.getElementById('detailModal').classList.add('hidden')" class="px-6 bg-slate-200 text-slate-600 font-black py-4 rounded-2xl">FERMER</button>
+            </div>
+        </div>
+    </div>
 
     <!-- MODAL CAMÉRA -->
     <div id="cameraModal" class="fixed inset-0 bg-slate-950/95 z-[300] hidden flex flex-col items-center justify-center p-6 text-white text-center">
