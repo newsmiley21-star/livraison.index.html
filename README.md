@@ -283,7 +283,7 @@
                                 <p class="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-400 mt-1">Logistics & Performance</p>
                                 <div class="mt-2 space-y-0.5 text-[9px] font-semibold text-slate-500">
                                     <p>BP 12450 • Zone Industrielle Oloumi</p>
-                                    <p>Libreville, Gabon • Tél: +241 077 73 60 65</p>
+                                    <p>Libreville, Gabon • Tél: +241 077 00 00 00</p>
                                 </div>
                             </div>
                         </div>
@@ -396,10 +396,9 @@
                             </p>
                         </div>
                         <div class="text-right">
-                            <img src="https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=tel:%2B24177736065" 
-         alt="QR Code Appel +24177736065" 
-         style="border: 1px solid #ccc; padding: 10px; border-radius: 8px;">
-</div>
+                           <img src="https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=tel:%2B24177736065" 
+     alt="QR Code Appel CT241" 
+     style="width: 200px; height: 200px; display: block; margin: 0 auto;">
                             <p class="text-[7px] font-black uppercase tracking-widest text-slate-400">Authentification CT241 Express</p>
                         </div>
                     </div>
