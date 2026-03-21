@@ -128,6 +128,7 @@
 
         window.publierMission = async (id) => {
             await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'missions', id), { statut: 'publie' });
+            showToast("Mission publiée aux livreurs", "success");
         };
 
         window.openCamera = (id) => {
@@ -184,20 +185,17 @@
                     stats.livraisonsTotal++;
                     if (m.livre_date_key === today) stats.caJour += m.prix || 0;
 
-                    // Groupement par livreur
                     const lEmail = m.livreur_email || 'Inconnu';
                     if (!stats.livreurs[lEmail]) stats.livreurs[lEmail] = { count: 0, ca: 0, bonus: 0 };
                     stats.livreurs[lEmail].count++;
                     stats.livreurs[lEmail].ca += m.prix || 0;
                     
-                    // Calcul Bonus CT241: 700 CFA après la 17ème mission
                     if (stats.livreurs[lEmail].count > 17) {
                         stats.livreurs[lEmail].bonus += 700;
                     }
                 }
             });
 
-            // Affichage Dashboard Admin
             if (userRole === 'admin') {
                 document.getElementById('dashCaTotal').innerText = stats.caTotal.toLocaleString() + ' CFA';
                 document.getElementById('dashCaJour').innerText = stats.caJour.toLocaleString() + ' CFA';
@@ -215,13 +213,10 @@
                 });
             }
 
-            // Affichage Ma Performance (Livreur)
             if (userRole === 'livreur') {
                 const myData = stats.livreurs[currentUser.email] || { count: 0, bonus: 0 };
                 document.getElementById('myCount').innerText = myData.count;
                 document.getElementById('myBonus').innerText = myData.bonus + ' CFA';
-                
-                // Barre de progression vers bonus (Objectif 17)
                 const prog = Math.min((myData.count / 17) * 100, 100);
                 document.getElementById('progBar').style.width = prog + '%';
                 document.getElementById('progLabel').innerText = myData.count >= 17 ? 'Bonus Activé !' : `Objectif Bonus : ${myData.count}/17 missions`;
@@ -236,34 +231,122 @@
             };
             Object.values(containers).forEach(c => c.innerHTML = "");
 
-            const sorted = allMissions.sort((a,b) => (b.livre_le || 0) - (a.livre_le || 0));
+            const sorted = allMissions.sort((a,b) => (b.created_at?.toMillis ? b.created_at.toMillis() : 0) - (a.created_at?.toMillis ? a.created_at.toMillis() : 0));
 
             sorted.forEach(m => {
                 const isMyColis = m.creator_email === currentUser.email;
                 if (m.statut === 'en_attente' && (userRole === 'admin' || userRole === 'dispatch')) {
                     containers.dispatch.innerHTML += `<div class="p-4 bg-white border border-slate-100 rounded-2xl mb-3 shadow-sm flex justify-between items-center">
                         <div class="text-[11px]"><span class="font-black text-blue-600 block">${m.id}</span><b>${m.client}</b><br><span class="text-slate-400">${m.arrivee}</span></div>
-                        <button onclick="publierMission('${m.id}')" class="bg-blue-600 text-white text-[10px] px-5 py-2 rounded-xl font-bold">DISPATCHER</button>
+                        <div class="flex gap-2">
+                            <button onclick="openManifeste('${m.id}')" class="bg-slate-100 text-slate-600 text-[9px] px-3 py-2 rounded-xl font-bold">MANIFESTE</button>
+                            <button onclick="publierMission('${m.id}')" class="bg-blue-600 text-white text-[10px] px-5 py-2 rounded-xl font-bold">DISPATCHER</button>
+                        </div>
                     </div>`;
                 } else if (m.statut === 'publie' && (userRole === 'admin' || userRole === 'livreur')) {
                     containers.livreur.innerHTML += `<div class="p-5 bg-amber-50 border border-amber-200 rounded-3xl mb-4 space-y-3">
                         <div class="flex justify-between font-black items-center text-amber-700"><span>${m.id}</span><span class="text-[9px] bg-amber-500 text-white px-2 py-1 rounded-full uppercase">Disponible</span></div>
                         <p class="text-[11px] text-amber-900"><b>Lieu:</b> ${m.arrivee}<br><b>Contact:</b> ${m.client} (${m.telephone})</p>
-                        <button onclick="openCamera('${m.id}')" class="w-full bg-amber-500 text-white font-black py-4 rounded-2xl shadow-lg active:scale-95 transition">VALIDER LIVRAISON</button>
+                        <div class="flex gap-2">
+                             <button onclick="openManifeste('${m.id}')" class="flex-1 bg-white border border-amber-200 text-amber-700 font-black py-4 rounded-2xl text-[10px]">MANIFESTE</button>
+                             <button onclick="openCamera('${m.id}')" class="flex-[2] bg-amber-500 text-white font-black py-4 rounded-2xl shadow-lg">VALIDER LIVRAISON</button>
+                        </div>
                     </div>`;
                 }
                 
-                // ARCHIVES PERMANENTES
                 const canSeeArchive = (userRole === 'admin' || userRole === 'dispatch' || (userRole === 'relais' && isMyColis));
                 if (canSeeArchive && m.statut === 'livre') {
                     containers.archives.innerHTML += `<tr class="border-b border-slate-800 text-[10px] hover:bg-slate-800 transition cursor-pointer" onclick="openArchiveDetail('${m.id}')">
                         <td class="p-4 font-bold text-white">${m.id}</td>
                         <td class="p-4 text-slate-300"><b>${m.client}</b></td>
                         <td class="p-4 text-center"><span class="text-emerald-400 font-black">LIVRÉ</span></td>
-                        <td class="p-4 text-right text-slate-400">${m.prix.toLocaleString()}</td>
+                        <td class="p-4 text-right text-slate-400">${(m.prix || 0).toLocaleString()}</td>
                     </tr>`;
                 }
             });
+            document.getElementById('archiveCount').innerText = sorted.filter(m => m.statut === 'livre').length;
+        };
+
+        window.openManifeste = (id) => {
+            const m = allMissions.find(x => x.id === id);
+            if (!m) return;
+            const now = new Date();
+            const dateStr = now.toLocaleDateString();
+            const hourStr = now.getHours().toString().padStart(2, '0') + ":" + now.getMinutes().toString().padStart(2, '0');
+            
+            document.getElementById('detailContent').innerHTML = `
+                <div class="print-area bg-white p-8 text-slate-900 font-serif">
+                    <div class="flex justify-between items-start border-b-4 border-slate-900 pb-4 mb-6">
+                        <div class="space-y-1">
+                            <h1 class="text-3xl font-black tracking-tighter">CT241</h1>
+                            <p class="text-[10px] uppercase font-bold bg-slate-900 text-white px-2 py-1 inline-block">Manifeste de Collecte Logistique</p>
+                        </div>
+                        <div class="text-right text-[10px] uppercase font-bold">
+                            <p>Document N° : MAN-${m.id.split('-')[1]}</p>
+                            <p>Émis le : ${dateStr}</p>
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-8 mb-8 text-[11px]">
+                        <div class="space-y-2">
+                            <p><b>POINT RELAIS :</b> <span class="border-b border-dotted border-slate-400 pb-1">${m.depart || '....................'}</span></p>
+                            <p><b>QUARTIER :</b> <span class="border-b border-dotted border-slate-400 pb-1">${m.depart.split('(')[0] || '....................'}</span></p>
+                        </div>
+                        <div class="space-y-2 text-right">
+                            <p><b>LIVREUR :</b> <span class="border-b border-dotted border-slate-400 pb-1">${userRole === 'livreur' ? currentUser.email.split('@')[0].toUpperCase() : '....................'}</span></p>
+                            <p><b>HEURE :</b> <span class="border-b border-dotted border-slate-400 pb-1">${hourStr}</span></p>
+                        </div>
+                    </div>
+
+                    <table class="w-full border-collapse border border-slate-900 mb-8 text-[10px]">
+                        <thead>
+                            <tr class="bg-slate-100">
+                                <th class="border border-slate-900 p-2 text-left">N° COLIS (ID)</th>
+                                <th class="border border-slate-900 p-2 text-left">DESTINATION</th>
+                                <th class="border border-slate-900 p-2 text-center">ÉTAT (OK/S)</th>
+                                <th class="border border-slate-900 p-2 text-right">VALEUR (FCFA)</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td class="border border-slate-900 p-3 font-bold">${m.id}</td>
+                                <td class="border border-slate-900 p-3">${m.arrivee}</td>
+                                <td class="border border-slate-900 p-3 text-center">OK</td>
+                                <td class="border border-slate-900 p-3 text-right font-black">${(m.prix || 0).toLocaleString()}</td>
+                            </tr>
+                            <!-- Lignes vides pour complétion manuelle si besoin -->
+                            <tr><td class="border border-slate-900 p-3 h-8"></td><td class="border border-slate-900 p-3"></td><td class="border border-slate-900 p-3"></td><td class="border border-slate-900 p-3"></td></tr>
+                        </tbody>
+                    </table>
+
+                    <div class="mb-10">
+                        <p class="text-[10px] font-bold">NOMBRE TOTAL DE COLIS : <span class="text-lg">01</span></p>
+                    </div>
+
+                    <div class="border-2 border-slate-900 p-4 rounded-lg mb-10">
+                        <h4 class="font-black text-[10px] uppercase mb-2 underline">Décharge de Responsabilité</h4>
+                        <p class="text-[9px] leading-relaxed italic">
+                            Je soussigné, livreur pour CT241, reconnaît avoir récupéré ce jour le(s) colis listé(s) ci-dessus en bon état apparent. 
+                            À compter de la signature de ce manifeste, la responsabilité du Point Relais est dégagée pour ces envois.
+                        </p>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-20 text-[10px] font-bold text-center">
+                        <div class="space-y-16">
+                            <p class="border-b border-slate-900 pb-2 uppercase">Signature Relais</p>
+                            <p class="text-[8px] text-slate-400">(Cachet Obligatoire)</p>
+                        </div>
+                        <div class="space-y-16">
+                            <p class="border-b border-slate-900 pb-2 uppercase">Signature Livreur CT241</p>
+                            <p class="text-[8px] text-slate-400">(Nom & Prénom)</p>
+                        </div>
+                    </div>
+
+                    <div class="mt-12 pt-4 border-t border-slate-100 text-center">
+                        <p class="text-[8px] text-slate-400 tracking-widest uppercase">CT241 LOGISTIQUE GABON - Document de Collecte Officiel</p>
+                    </div>
+                </div>`;
+            document.getElementById('detailModal').classList.remove('hidden');
         };
 
         window.openArchiveDetail = (id) => {
@@ -277,10 +360,10 @@
                     </div>
                     <div class="grid grid-cols-2 gap-4 text-xs">
                         <div class="p-3 bg-slate-50 rounded-xl"><p class="text-[8px] text-slate-400 uppercase font-black">Expéditeur</p><b>${m.client}</b></div>
-                        <div class="p-3 bg-slate-50 rounded-xl"><p class="text-[8px] text-slate-400 uppercase font-black">Livreur</p><b>${m.livreur_email}</b></div>
+                        <div class="p-3 bg-slate-50 rounded-xl"><p class="text-[8px] text-slate-400 uppercase font-black">Livreur</p><b>${m.livreur_email || 'Non assigné'}</b></div>
                     </div>
-                    <img src="${m.photoUrl}" class="w-full h-48 object-cover rounded-2xl border-4 border-slate-100">
-                    <div class="text-center font-black text-2xl py-2">${m.prix.toLocaleString()} CFA</div>
+                    ${m.photoUrl ? `<img src="${m.photoUrl}" class="w-full h-48 object-cover rounded-2xl border-4 border-slate-100">` : '<div class="h-20 flex items-center justify-center text-slate-300 italic text-[10px]">Photo non disponible</div>'}
+                    <div class="text-center font-black text-2xl py-2">${(m.prix || 0).toLocaleString()} CFA</div>
                 </div>`;
             document.getElementById('detailModal').classList.remove('hidden');
         };
@@ -297,7 +380,12 @@
         @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;800&display=swap');
         body { font-family: 'Plus Jakarta Sans', sans-serif; background-color: #f8fafc; overflow-x: hidden; }
         .hidden { display: none; }
-        @media print { body * { visibility: hidden; } .print-area, .print-area * { visibility: visible; } .print-area { position: fixed; left: 0; top: 0; width: 100%; } }
+        @media print { 
+            body * { visibility: hidden; } 
+            .print-area, .print-area * { visibility: visible; } 
+            .print-area { position: fixed; left: 0; top: 0; width: 100%; margin: 0; padding: 20px; }
+            .no-print { display: none !important; }
+        }
     </style>
 </head>
 <body class="min-h-screen">
@@ -382,7 +470,7 @@
                         <textarea id="colisContenu" placeholder="Nature du colis..." class="w-full p-4 bg-slate-50 rounded-2xl font-bold text-[10px] outline-none min-h-[80px] border border-transparent focus:border-emerald-500"></textarea>
                         <div class="grid grid-cols-2 gap-3">
                             <select id="ptDepart" class="p-4 bg-slate-50 rounded-2xl font-black text-[10px] outline-none"><option>Libreville (Relais)</option><option>Akanda</option></select>
-                            <select id="ptArrivee" class="p-4 bg-slate-50 rounded-2xl font-black text-[10px] outline-none"><option>Libreville (Client)</option><option>Owendo</option></select>
+                            <select id="ptArrivee" class="p-4 bg-slate-50 rounded-2xl font-black text-[10px] outline-none"><option>Libreville (Client)</option><option>Owendo</option><option>Ntoum</option></select>
                         </div>
                         <div class="grid grid-cols-2 gap-3">
                             <select id="typeService" class="p-4 bg-slate-50 rounded-2xl font-black text-[10px] outline-none"><option value="standard">Standard</option><option value="express">Express</option></select>
@@ -417,12 +505,12 @@
         </div>
     </main>
 
-    <!-- MODAL DETAIL -->
+    <!-- MODAL DETAIL / MANIFESTE -->
     <div id="detailModal" class="fixed inset-0 bg-slate-950/90 z-[400] hidden flex items-center justify-center p-4">
-        <div class="w-full max-w-sm bg-white rounded-[2.5rem] shadow-2xl overflow-hidden animate-in zoom-in duration-200">
+        <div class="w-full max-w-2xl bg-white rounded-[2.5rem] shadow-2xl overflow-y-auto max-h-[90vh] animate-in zoom-in duration-200">
             <div id="detailContent"></div>
             <div class="p-6 bg-slate-50 flex gap-2 no-print">
-                <button onclick="window.print()" class="flex-1 bg-slate-900 text-white font-black py-4 rounded-2xl text-[10px]">🖨️ IMPRIMER</button>
+                <button onclick="window.print()" class="flex-1 bg-slate-900 text-white font-black py-4 rounded-2xl text-[10px]">📑 IMPRIMER MANIFESTE</button>
                 <button onclick="document.getElementById('detailModal').classList.add('hidden')" class="px-6 bg-slate-200 text-slate-600 font-black py-4 rounded-2xl text-[10px]">RETOUR</button>
             </div>
         </div>
