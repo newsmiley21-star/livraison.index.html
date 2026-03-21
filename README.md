@@ -12,12 +12,23 @@
         import { getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-auth.js";
         import { getFirestore, collection, doc, setDoc, updateDoc, onSnapshot, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-firestore.js";
 
-        // Configuration Firebase
-        const firebaseConfig = JSON.parse(__firebase_config);
+        // Configuration Firebase personnalisée
+        const firebaseConfig = {
+            apiKey: "AIzaSyAdNSFmL45rSo9SxJJkvUPWeext0f7RX_Q",
+            authDomain: "ct241-service-de-livraison.firebaseapp.com",
+            databaseURL: "https://ct241-service-de-livraison-default-rtdb.firebaseio.com",
+            projectId: "ct241-service-de-livraison",
+            storageBucket: "ct241-service-de-livraison.firebasestorage.app",
+            messagingSenderId: "297254676010",
+            appId: "1:297254676010:web:01e3765686c8d478618553",
+            measurementId: "G-GMPJY3R4T3"
+        };
+
+        // Initialisation
         const app = initializeApp(firebaseConfig);
         const auth = getAuth(app);
         const db = getFirestore(app);
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'ct241-secure-logistics';
+        const appId = 'ct241-service-de-livraison'; // Identifiant unique lié à votre projet
 
         // État de l'application
         let currentUser = null;
@@ -174,7 +185,10 @@
                 const missions = [];
                 snapshot.forEach(doc => missions.push(doc.data()));
                 renderUI(missions);
-            }, (error) => console.error("Erreur Firestore:", error));
+            }, (error) => {
+                console.error("Erreur Firestore:", error);
+                showToast("Erreur de synchronisation", "error");
+            });
         };
 
         const renderUI = (missions) => {
@@ -244,7 +258,7 @@
             <form onsubmit="handleLogin(event)" class="space-y-4">
                 <div class="space-y-1">
                     <label class="text-[10px] font-black text-slate-400 uppercase ml-2">Email Professionnel</label>
-                    <input type="email" id="loginEmail" required class="w-full p-4 bg-slate-50 border-2 border-slate-100 rounded-2xl focus:border-slate-900 outline-none transition-all font-semibold" placeholder="nom@ct241.ga">
+                    <input type="email" id="loginEmail" required class="w-full p-4 bg-slate-50 border-2 border-slate-100 rounded-2xl focus:border-slate-900 outline-none transition-all font-semibold" placeholder="votre@email.com">
                 </div>
                 <div class="space-y-1">
                     <label class="text-[10px] font-black text-slate-400 uppercase ml-2">Mot de passe</label>
@@ -255,7 +269,7 @@
                     SE CONNECTER
                 </button>
             </form>
-            <p class="text-[9px] text-slate-400 text-center font-medium italic">Accès restreint au personnel autorisé.</p>
+            <p class="text-[9px] text-slate-400 text-center font-medium italic">Accès restreint au personnel CT241 Gabon.</p>
         </div>
     </section>
 
