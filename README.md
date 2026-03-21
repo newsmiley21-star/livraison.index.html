@@ -78,10 +78,12 @@
             else if (e.includes('dispatch') || e.includes('gestionnaire')) userRole = 'dispatch';
             else if (e.includes('livreur')) userRole = 'livreur';
             
+            // Reset visibility
             document.querySelectorAll('.role-section').forEach(s => s.classList.add('hidden'));
+            
             const badge = document.getElementById('badgeDisplay');
             const colors = { admin: 'bg-red-600', dispatch: 'bg-blue-600', relais: 'bg-emerald-600', livreur: 'bg-amber-600' };
-            badge.innerHTML = `<span class="px-3 py-1 rounded-full text-[10px] font-black uppercase text-white ${colors[userRole] || 'bg-slate-500'}">${userRole}</span>`;
+            badge.innerHTML = `<span class="px-3 py-1 rounded-full text-[10px] font-black uppercase text-white ${colors[userRole] || 'bg-slate-500'}">${userRole || 'Utilisateur'}</span>`;
 
             if (userRole === 'admin') {
                 document.querySelectorAll('.role-section').forEach(s => s.classList.remove('hidden'));
@@ -131,14 +133,19 @@
                     creator_email: currentUser.email
                 });
                 showToast("Bon de livraison créé !", "success");
-                ['expNom', 'expQuartier', 'expTel', 'destNom', 'destQuartier', 'destTel', 'valeurDeclaree', 'fraisLivraison'].forEach(id => document.getElementById(id).value = "");
+                ['expNom', 'expQuartier', 'expTel', 'destNom', 'destTel', 'valeurDeclaree', 'fraisLivraison'].forEach(id => {
+                    const el = document.getElementById(id);
+                    if(el) el.value = "";
+                });
                 prepareNextId();
             } catch (e) { showToast("Erreur système", "error"); }
         };
 
         window.publierMission = async (id) => {
-            await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'missions', id), { statut: 'publie' });
-            showToast("Mission publiée aux livreurs", "success");
+            try {
+                await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'missions', id), { statut: 'publie' });
+                showToast("Mission publiée aux livreurs", "success");
+            } catch (e) { showToast("Erreur de publication", "error"); }
         };
 
         window.openCamera = (id) => {
@@ -147,6 +154,7 @@
         };
 
         window.processImage = (file) => {
+            if (!file) return;
             const reader = new FileReader();
             reader.onload = (e) => {
                 const img = new Image();
@@ -164,16 +172,18 @@
         };
 
         const finalizeDelivery = async (photo) => {
-            const today = new Date().toISOString().split('T')[0];
-            await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'missions', currentMissionId), {
-                statut: 'livre', 
-                photoUrl: photo, 
-                livre_le: Date.now(), 
-                livre_date_key: today,
-                livreur_email: currentUser.email
-            });
-            document.getElementById('cameraModal').classList.add('hidden');
-            showToast("Mission accomplie !", "success");
+            try {
+                const today = new Date().toISOString().split('T')[0];
+                await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'missions', currentMissionId), {
+                    statut: 'livre', 
+                    photoUrl: photo, 
+                    livre_le: Date.now(), 
+                    livre_date_key: today,
+                    livreur_email: currentUser.email
+                });
+                document.getElementById('cameraModal').classList.add('hidden');
+                showToast("Mission accomplie !", "success");
+            } catch (e) { showToast("Erreur lors de la validation", "error"); }
         };
 
         const startListeners = () => {
@@ -233,7 +243,6 @@
             }
         };
 
-        // --- GESTION DE LA RECHERCHE ---
         window.handleSearch = (val) => {
             searchQuery = val.toLowerCase().trim();
             renderUI();
@@ -245,16 +254,19 @@
                 livreur: document.getElementById('containerLivreur'),
                 archives: document.getElementById('archiveBody')
             };
-            Object.values(containers).forEach(c => c.innerHTML = "");
+            Object.values(containers).forEach(c => { if(c) c.innerHTML = ""; });
 
-            const sorted = allMissions.sort((a,b) => (b.created_at?.toMillis ? b.created_at.toMillis() : 0) - (a.created_at?.toMillis ? a.created_at.toMillis() : 0));
+            const sorted = allMissions.sort((a,b) => {
+                const timeA = a.created_at?.toMillis ? a.created_at.toMillis() : (a.livre_le || 0);
+                const timeB = b.created_at?.toMillis ? b.created_at.toMillis() : (b.livre_le || 0);
+                return timeB - timeA;
+            });
 
             let countLivre = 0;
 
             sorted.forEach(m => {
                 const isMyColis = m.creator_email === currentUser.email;
                 
-                // Rendu Dispatch
                 if (m.statut === 'en_attente' && (userRole === 'admin' || userRole === 'dispatch')) {
                     containers.dispatch.innerHTML += `<div class="p-4 bg-white border border-slate-100 rounded-2xl mb-3 shadow-sm flex justify-between items-center">
                         <div class="text-[11px]"><span class="font-black text-blue-600 block">${m.id}</span><b>${m.dest_nom}</b><br><span class="text-slate-400">${m.dest_quartier}</span></div>
@@ -264,7 +276,6 @@
                         </div>
                     </div>`;
                 } 
-                // Rendu Livreur
                 else if (m.statut === 'publie' && (userRole === 'admin' || userRole === 'livreur')) {
                     containers.livreur.innerHTML += `<div class="p-5 bg-amber-50 border border-amber-200 rounded-3xl mb-4 space-y-3">
                         <div class="flex justify-between font-black items-center text-amber-700"><span>${m.id}</span><span class="text-[9px] bg-amber-500 text-white px-2 py-1 rounded-full uppercase">Disponible</span></div>
@@ -276,7 +287,6 @@
                     </div>`;
                 }
                 
-                // Rendu Archives avec Recherche
                 const canSeeArchive = (userRole === 'admin' || userRole === 'dispatch' || (userRole === 'relais' && isMyColis));
                 if (canSeeArchive && m.statut === 'livre') {
                     const matchSearch = !searchQuery || 
@@ -296,7 +306,8 @@
                     }
                 }
             });
-            document.getElementById('archiveCount').innerText = countLivre;
+            const archCountEl = document.getElementById('archiveCount');
+            if(archCountEl) archCountEl.innerText = countLivre;
         };
 
         window.openBonImpression = (id) => {
@@ -318,69 +329,45 @@
                              <p class="text-[10px] font-bold">N° Course : ${m.id} | Date : ${dateStr} | Heure : ${hourStr}</p>
                         </div>
                     </div>
-
                     <div class="space-y-6">
                         <div class="space-y-2">
-                            <h3 class="bg-slate-100 p-1 text-[11px] font-black uppercase">1. INFORMATIONS EXPÉDITEUR (Client)</h3>
+                            <h3 class="bg-slate-100 p-1 text-[11px] font-black uppercase">1. INFORMATIONS EXPÉDITEUR</h3>
                             <div class="grid grid-cols-1 gap-2 text-[12px] px-2">
-                                <p><b>Nom / Enseigne :</b> <span class="border-b border-slate-300 pb-1 flex-1">${m.exp_nom}</span></p>
+                                <p><b>Nom / Enseigne :</b> ${m.exp_nom}</p>
                                 <div class="flex justify-between">
-                                    <p class="w-1/2"><b>Quartier :</b> <span class="border-b border-slate-300 pb-1">${m.exp_quartier}</span></p>
-                                    <p class="w-1/2"><b>Tél :</b> <span class="border-b border-slate-300 pb-1">${m.exp_tel}</span></p>
+                                    <p><b>Quartier :</b> ${m.exp_quartier}</p>
+                                    <p><b>Tél :</b> ${m.exp_tel}</p>
                                 </div>
                             </div>
                         </div>
-
                         <div class="space-y-2">
-                            <h3 class="bg-slate-100 p-1 text-[11px] font-black uppercase">2. INFORMATIONS DESTINATAIRE (Réception)</h3>
+                            <h3 class="bg-slate-100 p-1 text-[11px] font-black uppercase">2. INFORMATIONS DESTINATAIRE</h3>
                             <div class="grid grid-cols-1 gap-2 text-[12px] px-2">
-                                <p><b>Nom :</b> <span class="border-b border-slate-300 pb-1">${m.dest_nom}</span></p>
-                                <p><b>Quartier de livraison :</b> <span class="border-b border-slate-300 pb-1">${m.dest_quartier}</span></p>
-                                <p><b>Téléphone :</b> <span class="border-b border-slate-300 pb-1">${m.dest_tel}</span></p>
+                                <p><b>Nom :</b> ${m.dest_nom}</p>
+                                <p><b>Quartier de livraison :</b> ${m.dest_quartier}</p>
+                                <p><b>Téléphone :</b> ${m.dest_tel}</p>
                             </div>
                         </div>
-
                         <div class="space-y-2">
                             <h3 class="bg-slate-100 p-1 text-[11px] font-black uppercase">3. DÉTAILS DU COLIS & PAIEMENT</h3>
                             <div class="px-2 space-y-3">
                                 <div class="flex gap-4 text-[11px] font-bold">
-                                    <span>Nature :</span>
-                                    <span>[${m.nature === 'standard' ? 'X' : ' '}] Standard</span>
-                                    <span>[${m.nature === 'repas' ? 'X' : ' '}] Repas</span>
-                                    <span>[${m.nature === 'docs' ? 'X' : ' '}] Documents</span>
-                                    <span>[${m.nature === 'pharma' ? 'X' : ' '}] Pharma</span>
+                                    <span>Nature : ${m.nature.toUpperCase()}</span>
+                                    <span>Règlement : ${m.reglement.toUpperCase()}</span>
                                 </div>
                                 <div class="flex justify-between text-[12px]">
-                                    <p><b>Valeur déclarée :</b> ${m.valeur.toLocaleString()} FCFA</p>
+                                    <p><b>Valeur :</b> ${m.valeur.toLocaleString()} FCFA</p>
                                     <p><b>Frais Livraison :</b> <span class="text-lg font-black underline">${m.prix.toLocaleString()} FCFA</span></p>
                                 </div>
-                                <div class="flex gap-4 text-[10px] font-bold">
-                                    <span>Mode :</span>
-                                    <span>[${m.reglement === 'cash' ? 'X' : ' '}] Espèces (Cash)</span>
-                                    <span>[${m.reglement === 'airtel' ? 'X' : ' '}] Airtel Money</span>
-                                    <span>[${m.reglement === 'moov' ? 'X' : ' '}] Moov Money</span>
-                                </div>
                             </div>
                         </div>
-
                         <div class="space-y-2">
-                            <h3 class="bg-slate-100 p-1 text-[11px] font-black uppercase">4. VALIDATION & SIGNATURE</h3>
+                            <h3 class="bg-slate-100 p-1 text-[11px] font-black uppercase">4. VALIDATION</h3>
                             <div class="grid grid-cols-2 gap-10 mt-4 px-2">
-                                <div class="space-y-12">
-                                    <p class="text-[10px] font-bold border-b border-slate-400 pb-1">Livreur CT241 : ${m.livreur_email ? m.livreur_email.split('@')[0].toUpperCase() : '................'}</p>
-                                    <p class="text-[8px] italic text-slate-400">Signature Livreur</p>
-                                </div>
-                                <div class="space-y-12 border border-slate-200 p-4 rounded-xl text-center">
-                                    <p class="text-[9px] font-bold">Signature Réceptionnaire</p>
-                                    <p class="text-[7px] text-slate-400">(Confirme réception en bon état)</p>
-                                </div>
+                                <div class="space-y-8"><p class="text-[10px] font-bold">Livreur : ${m.livreur_email ? m.livreur_email.split('@')[0] : '...........'}</p></div>
+                                <div class="border border-slate-200 p-4 rounded-xl text-center"><p class="text-[9px]">Signature Client</p></div>
                             </div>
                         </div>
-                    </div>
-
-                    <div class="mt-10 pt-4 border-t-2 border-slate-900 text-center space-y-1">
-                        <p class="text-[10px] font-black italic">Note : En cas de problème, contactez le service client CT241.</p>
-                        <p class="text-[9px] font-bold tracking-widest uppercase">MERCI DE VOTRE CONFIANCE !</p>
                     </div>
                 </div>`;
             document.getElementById('detailModal').classList.remove('hidden');
@@ -390,7 +377,7 @@
             const m = allMissions.find(x => x.id === id);
             if (!m) return;
             document.getElementById('detailContent').innerHTML = `
-                <div class="print-area bg-white p-6 space-y-4 text-slate-900 rounded-3xl">
+                <div class="bg-white p-6 space-y-4 text-slate-900 rounded-3xl">
                     <div class="flex justify-between items-center border-b-2 border-slate-100 pb-4">
                         <img src="https://i.ibb.co/q3t8t3Rj/Gemini-Generated-Image-1pvtp31pvtp31pvt.png" class="h-10">
                         <div class="text-right font-black text-xl text-emerald-600">${m.id}</div>
@@ -423,14 +410,11 @@
             .print-area { position: fixed; left: 0; top: 0; width: 100%; margin: 0; padding: 20px; }
             .no-print { display: none !important; }
         }
-        input::placeholder { color: #cbd5e1; font-weight: normal; }
     </style>
 </head>
 <body class="min-h-screen">
-
     <div id="toast" class="hidden"></div>
 
-    <!-- AUTHENTICATION -->
     <section id="authSection" class="fixed inset-0 bg-slate-900 flex items-center justify-center p-6 z-[200]">
         <div class="w-full max-w-sm bg-white rounded-[3rem] p-10 space-y-8 shadow-2xl text-center">
             <img src="https://i.ibb.co/q3t8t3Rj/Gemini-Generated-Image-1pvtp31pvtp31pvt.png" class="h-24 mx-auto">
@@ -444,7 +428,6 @@
         </div>
     </section>
 
-    <!-- CONTENT -->
     <main id="appContent" class="hidden pb-24">
         <nav class="bg-white/80 backdrop-blur-md p-4 sticky top-0 z-50 border-b border-slate-100 no-print">
             <div class="max-w-xl mx-auto flex justify-between items-center">
@@ -457,22 +440,11 @@
         </nav>
 
         <div class="max-w-xl mx-auto p-4 space-y-6">
-            
-            <!-- ADMIN DASHBOARD -->
             <section id="adminDash" class="role-section hidden space-y-4">
                 <div class="grid grid-cols-3 gap-3">
-                    <div class="bg-slate-900 p-4 rounded-3xl text-white shadow-lg">
-                        <span class="text-[8px] uppercase font-black text-slate-400">CA Total</span>
-                        <div id="dashCaTotal" class="text-xs font-black text-emerald-400">0</div>
-                    </div>
-                    <div class="bg-slate-900 p-4 rounded-3xl text-white shadow-lg">
-                        <span class="text-[8px] uppercase font-black text-slate-400">CA Jour</span>
-                        <div id="dashCaJour" class="text-xs font-black text-yellow-500">0</div>
-                    </div>
-                    <div class="bg-slate-900 p-4 rounded-3xl text-white shadow-lg">
-                        <span class="text-[8px] uppercase font-black text-slate-400">Missions</span>
-                        <div id="dashLivTotal" class="text-xs font-black text-blue-400">0</div>
-                    </div>
+                    <div class="bg-slate-900 p-4 rounded-3xl text-white shadow-lg"><span class="text-[8px] uppercase font-black text-slate-400">CA Total</span><div id="dashCaTotal" class="text-xs font-black text-emerald-400">0</div></div>
+                    <div class="bg-slate-900 p-4 rounded-3xl text-white shadow-lg"><span class="text-[8px] uppercase font-black text-slate-400">CA Jour</span><div id="dashCaJour" class="text-xs font-black text-yellow-500">0</div></div>
+                    <div class="bg-slate-900 p-4 rounded-3xl text-white shadow-lg"><span class="text-[8px] uppercase font-black text-slate-400">Missions</span><div id="dashLivTotal" class="text-xs font-black text-blue-400">0</div></div>
                 </div>
                 <div class="bg-slate-900 p-6 rounded-[2.5rem] shadow-2xl">
                     <h3 class="text-white font-black text-[10px] uppercase mb-4">Performance par Livreur</h3>
@@ -480,7 +452,6 @@
                 </div>
             </section>
 
-            <!-- LIVREUR STATS -->
             <section id="statLivreurSection" class="role-section hidden">
                 <div class="bg-slate-900 p-6 rounded-[2.5rem] text-white shadow-2xl space-y-5">
                     <div class="flex justify-between items-end">
@@ -489,147 +460,102 @@
                     </div>
                     <div class="space-y-2">
                         <div class="flex justify-between text-[9px] font-bold uppercase"><span id="progLabel">Objectif Bonus</span><span>17 Missions</span></div>
-                        <div class="w-full h-3 bg-slate-800 rounded-full overflow-hidden">
-                            <div id="progBar" class="h-full bg-emerald-500 transition-all duration-700" style="width: 0%"></div>
-                        </div>
+                        <div class="w-full h-3 bg-slate-800 rounded-full overflow-hidden"><div id="progBar" class="h-full bg-emerald-500 transition-all duration-700" style="width: 0%"></div></div>
                     </div>
                 </div>
             </section>
 
-            <!-- BOUTIQUE : RECEPTION -->
             <section id="rubrique1" class="role-section hidden">
                 <div class="bg-white rounded-[2.5rem] shadow-xl border border-slate-100 overflow-hidden">
-                    <div class="bg-emerald-600 p-6 text-white flex justify-between items-center">
-                        <div>
-                            <p class="text-[10px] font-black uppercase tracking-widest opacity-70">📦 Bon de Livraison</p>
-                            <h2 class="font-black text-xs uppercase">Course : <span id="displayNextId">...</span></h2>
-                        </div>
+                    <div class="bg-emerald-600 p-6 text-white">
+                        <p class="text-[10px] font-black uppercase tracking-widest opacity-70">📦 Bon de Livraison</p>
+                        <h2 class="font-black text-xs uppercase">Course : <span id="displayNextId">...</span></h2>
                     </div>
-                    
                     <div class="p-6 space-y-8">
                         <div class="space-y-3">
-                            <p class="text-[9px] font-black text-emerald-600 uppercase border-l-4 border-emerald-600 pl-2">1. INFORMATIONS EXPÉDITEUR</p>
-                            <input type="text" id="expNom" placeholder="Nom / Enseigne (Client)" class="w-full p-4 bg-slate-50 rounded-2xl font-bold text-[11px] outline-none border border-transparent focus:border-emerald-500">
+                            <p class="text-[9px] font-black text-emerald-600 uppercase border-l-4 border-emerald-600 pl-2">1. EXPÉDITEUR</p>
+                            <input type="text" id="expNom" placeholder="Nom / Enseigne" class="w-full p-4 bg-slate-50 rounded-2xl font-bold text-[11px] outline-none">
                             <div class="grid grid-cols-2 gap-3">
-                                <input type="text" id="expQuartier" placeholder="Quartier" class="p-4 bg-slate-50 rounded-2xl font-bold text-[11px] outline-none border border-transparent focus:border-emerald-500">
-                                <input type="tel" id="expTel" placeholder="Téléphone" class="p-4 bg-slate-50 rounded-2xl font-bold text-[11px] outline-none border border-transparent focus:border-emerald-500">
+                                <input type="text" id="expQuartier" placeholder="Quartier" class="p-4 bg-slate-50 rounded-2xl font-bold text-[11px] outline-none">
+                                <input type="tel" id="expTel" placeholder="Téléphone" class="p-4 bg-slate-50 rounded-2xl font-bold text-[11px] outline-none">
                             </div>
                         </div>
-
                         <div class="space-y-3">
-                            <p class="text-[9px] font-black text-emerald-600 uppercase border-l-4 border-emerald-600 pl-2">2. INFORMATIONS DESTINATAIRE</p>
-                            <input type="text" id="destNom" placeholder="Nom du destinataire" class="w-full p-4 bg-slate-50 rounded-2xl font-bold text-[11px] outline-none border border-transparent focus:border-emerald-500">
+                            <p class="text-[9px] font-black text-emerald-600 uppercase border-l-4 border-emerald-600 pl-2">2. DESTINATAIRE</p>
+                            <input type="text" id="destNom" placeholder="Nom du destinataire" class="w-full p-4 bg-slate-50 rounded-2xl font-bold text-[11px] outline-none">
                             <div class="grid grid-cols-2 gap-3">
                                 <select id="destQuartier" class="p-4 bg-slate-50 rounded-2xl font-bold text-[11px] outline-none">
-                                    <option value="" disabled selected>Quartier de livraison</option>
-                                    <option>Angondjé</option>
-                                    <option>Nzeng-Ayong</option>
-                                    <option>Oloumi</option>
-                                    <option>Owendo</option>
-                                    <option>Akanda</option>
-                                    <option>Ntoum</option>
+                                    <option value="Angondjé">Angondjé</option>
+                                    <option value="Nzeng-Ayong">Nzeng-Ayong</option>
+                                    <option value="Oloumi">Oloumi</option>
+                                    <option value="Owendo">Owendo</option>
+                                    <option value="Akanda">Akanda</option>
+                                    <option value="Awendje">Awendjé</option>
                                 </select>
-                                <input type="tel" id="destTel" placeholder="Tél Destinataire" class="p-4 bg-slate-50 rounded-2xl font-bold text-[11px] outline-none border border-transparent focus:border-emerald-500">
+                                <input type="tel" id="destTel" placeholder="Tél Destinataire" class="p-4 bg-slate-50 rounded-2xl font-bold text-[11px] outline-none">
                             </div>
                         </div>
-
                         <div class="space-y-3">
-                            <p class="text-[9px] font-black text-emerald-600 uppercase border-l-4 border-emerald-600 pl-2">3. DÉTAILS DU COLIS & PAIEMENT</p>
+                            <p class="text-[9px] font-black text-emerald-600 uppercase border-l-4 border-emerald-600 pl-2">3. COLIS & PAIEMENT</p>
                             <div class="grid grid-cols-2 gap-3">
                                 <select id="natureColis" class="p-4 bg-slate-50 rounded-2xl font-bold text-[11px] outline-none">
-                                    <option value="standard">📦 Standard</option>
-                                    <option value="repas">🍔 Repas</option>
-                                    <option value="docs">📄 Documents</option>
-                                    <option value="pharma">💊 Pharma</option>
+                                    <option value="standard">📦 Standard</option><option value="repas">🍔 Repas</option><option value="docs">📄 Documents</option>
                                 </select>
                                 <select id="modeReglement" class="p-4 bg-slate-50 rounded-2xl font-bold text-[11px] outline-none">
-                                    <option value="cash">Espèces (Cash)</option>
-                                    <option value="airtel">Airtel Money</option>
-                                    <option value="moov">Moov Money</option>
+                                    <option value="cash">Espèces</option><option value="airtel">Airtel Money</option><option value="moov">Moov Money</option>
                                 </select>
                             </div>
                             <div class="grid grid-cols-2 gap-3">
-                                <input type="number" id="valeurDeclaree" placeholder="Valeur déclarée (CFA)" class="p-4 bg-slate-50 rounded-2xl font-bold text-[11px] outline-none border border-transparent focus:border-emerald-500">
-                                <input type="number" id="fraisLivraison" placeholder="Frais Livraison (CFA)" class="p-4 bg-slate-100 rounded-2xl font-black text-[11px] outline-none border-2 border-emerald-600">
+                                <input type="number" id="valeurDeclaree" placeholder="Valeur (CFA)" class="p-4 bg-slate-50 rounded-2xl font-bold text-[11px] outline-none">
+                                <input type="number" id="fraisLivraison" placeholder="Frais (CFA)" class="p-4 bg-slate-100 rounded-2xl font-black text-[11px] border-2 border-emerald-600 outline-none">
                             </div>
                         </div>
-
-                        <button onclick="genererMission()" class="w-full bg-emerald-600 text-white font-black py-5 rounded-3xl shadow-xl active:scale-95 transition-all text-[11px] uppercase tracking-widest">
-                            CRÉER LE BON DE LIVRAISON
-                        </button>
+                        <button onclick="genererMission()" class="w-full bg-emerald-600 text-white font-black py-5 rounded-3xl shadow-xl text-[11px] uppercase">CRÉER LE BON</button>
                     </div>
                 </div>
             </section>
 
-            <!-- GESTIONNAIRE : DISPATCH -->
-            <section id="rubrique2" class="role-section hidden">
-                <h3 class="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4 ml-2">Flux à dispatcher</h3>
-                <div id="containerDispatch"></div>
-            </section>
+            <section id="rubrique2" class="role-section hidden"><div id="containerDispatch"></div></section>
+            <section id="rubrique3" class="role-section hidden"><div id="containerLivreur"></div></section>
 
-            <!-- LIVREUR : MISSIONS -->
-            <section id="rubrique3" class="role-section hidden">
-                <h3 class="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4 ml-2">Missions de livraison</h3>
-                <div id="containerLivreur"></div>
-            </section>
-
-            <!-- ARCHIVES AVEC RECHERCHE -->
             <section id="rubrique4" class="role-section hidden">
                 <div class="bg-slate-900 rounded-[2.5rem] overflow-hidden shadow-2xl">
                     <div class="p-6">
                         <div class="flex justify-between items-center mb-6">
-                            <h2 class="text-white font-black text-xs uppercase">Historique Livraisons</h2>
+                            <h2 class="text-white font-black text-xs uppercase">Historique</h2>
                             <div id="archiveCount" class="bg-yellow-500 text-slate-900 font-black text-[9px] px-3 py-1 rounded-full">0</div>
                         </div>
-                        
-                        <!-- BARRE DE RECHERCHE -->
-                        <div class="relative group">
-                            <div class="absolute inset-y-0 left-4 flex items-center pointer-events-none">
-                                <svg class="w-4 h-4 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
-                            </div>
-                            <input 
-                                type="text" 
-                                oninput="handleSearch(this.value)"
-                                placeholder="Rechercher une course, un nom, un quartier..." 
-                                class="w-full p-4 pl-12 bg-white/5 border border-white/10 rounded-2xl text-[11px] text-white font-bold outline-none focus:border-emerald-500/50 focus:bg-white/10 transition-all placeholder:text-slate-600"
-                            >
-                        </div>
+                        <input type="text" oninput="handleSearch(this.value)" placeholder="Rechercher..." class="w-full p-4 bg-white/5 border border-white/10 rounded-2xl text-[11px] text-white outline-none">
                     </div>
-
-                    <div class="overflow-x-auto">
-                        <table class="w-full text-left">
-                            <thead class="bg-white/5 text-slate-500 text-[8px] uppercase font-black">
-                                <tr><th class="p-4">ID</th><th class="p-4">Client</th><th class="p-4 text-center">Statut</th><th class="p-4 text-right">CFA</th></tr>
-                            </thead>
-                            <tbody id="archiveBody"></tbody>
-                        </table>
-                    </div>
+                    <table class="w-full text-left">
+                        <thead class="bg-white/5 text-slate-500 text-[8px] uppercase font-black">
+                            <tr><th class="p-4">ID</th><th class="p-4">Client</th><th class="p-4 text-center">Statut</th><th class="p-4 text-right">CFA</th></tr>
+                        </thead>
+                        <tbody id="archiveBody"></tbody>
+                    </table>
                 </div>
             </section>
         </div>
     </main>
 
-    <!-- MODAL DETAIL / IMPRESSION -->
     <div id="detailModal" class="fixed inset-0 bg-slate-950/90 z-[400] hidden flex items-center justify-center p-4">
-        <div class="w-full max-w-2xl bg-white rounded-[2.5rem] shadow-2xl overflow-y-auto max-h-[90vh] animate-in zoom-in duration-200">
+        <div class="w-full max-w-2xl bg-white rounded-[2.5rem] shadow-2xl overflow-y-auto max-h-[90vh]">
             <div id="detailContent"></div>
             <div class="p-6 bg-slate-50 flex gap-2 no-print">
-                <button onclick="window.print()" class="flex-1 bg-slate-900 text-white font-black py-4 rounded-2xl text-[10px]">🖨️ IMPRIMER LE BON</button>
+                <button onclick="window.print()" class="flex-1 bg-slate-900 text-white font-black py-4 rounded-2xl text-[10px]">🖨️ IMPRIMER</button>
                 <button onclick="document.getElementById('detailModal').classList.add('hidden')" class="px-6 bg-slate-200 text-slate-600 font-black py-4 rounded-2xl text-[10px]">FERMER</button>
             </div>
         </div>
     </div>
 
-    <!-- CAMERA -->
     <div id="cameraModal" class="fixed inset-0 bg-black z-[300] hidden flex flex-col items-center justify-center p-8 text-white">
         <div class="text-center space-y-8">
             <div class="text-6xl">📸</div>
             <h2 class="text-2xl font-black">Preuve de Livraison</h2>
             <input type="file" id="fileInput" accept="image/*" capture="camera" class="hidden" onchange="processImage(this.files[0])">
-            <button onclick="document.getElementById('fileInput').click()" class="w-full bg-white text-black font-black py-5 rounded-3xl shadow-2xl uppercase tracking-widest text-xs">Ouvrir l'appareil</button>
+            <button onclick="document.getElementById('fileInput').click()" class="w-full bg-white text-black font-black py-5 rounded-3xl shadow-2xl uppercase text-xs">Ouvrir l'appareil</button>
             <button onclick="document.getElementById('cameraModal').classList.add('hidden')" class="text-slate-500 text-[10px] font-bold uppercase underline">Annuler</button>
         </div>
     </div>
-
 </body>
 </html>
