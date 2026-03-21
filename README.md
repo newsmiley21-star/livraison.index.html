@@ -33,6 +33,13 @@
         const app = initializeApp(firebaseConfig);
         const auth = getAuth(app);
         const db = getFirestore(app);
+        enableIndexedDbPersistence(db).catch((err) => {
+    if (err.code == 'failed-precondition') {
+        console.warn("Persistance échouée : onglets multiples ouverts");
+    } else if (err.code == 'unimplemented') {
+        console.warn("Navigateur non compatible avec la persistance");
+    }
+});
         const appId = 'ct241-service-de-livraison';
 
         let currentUser = null;
@@ -43,19 +50,23 @@
         let filterToday = false;
 
         // --- AUTH ---
-        window.handleLogin = async (e) => {
-            e.preventDefault();
-            const email = document.getElementById('loginEmail').value;
-            const pass = document.getElementById('loginPass').value;
-            const btn = document.getElementById('loginBtn');
-            btn.disabled = true;
-            btn.innerText = "Connexion...";
-            try { await signInWithEmailAndPassword(auth, email, pass); } 
-            catch (error) { 
-                document.getElementById('loginError').classList.remove('hidden');
-                btn.disabled = false; btn.innerText = "ACCÉDER AU PORTAIL";
-            }
-        };
+        window.handleLogout = async () => { 
+    try {
+        await signOut(auth);
+        // On remet tout à zéro proprement
+        currentUser = null;
+        userRole = null;
+        allMissions = [];
+        
+        // On bascule l'affichage sans recharger la page
+        document.getElementById('appContent').classList.add('hidden');
+        document.getElementById('authSection').classList.remove('hidden');
+        
+        showToast("Déconnexion réussie", "success");
+    } catch (e) {
+        console.error("Erreur logout:", e);
+    }
+};
 
         window.handleLogout = async () => { await signOut(auth); location.reload(); };
 
