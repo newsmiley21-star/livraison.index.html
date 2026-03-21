@@ -28,13 +28,13 @@
         const app = initializeApp(firebaseConfig);
         const auth = getAuth(app);
         const db = getFirestore(app);
-        const appId = 'ct241-service-de-livraison'; // Identifiant unique lié à votre projet
+        const appId = 'ct241-service-de-livraison';
 
         // État de l'application
         let currentUser = null;
         let currentRole = 'admin';
         let currentMissionId = null;
-        const LOGO_URL = "https://i.ibb.co/q3t8t3Rj/Gemini-Generated-Image-1pvtp31pvtp31pvt.png";
+        let nextGeneratedId = "";
 
         // --- AUTHENTIFICATION ---
         window.handleLogin = async (e) => {
@@ -74,6 +74,7 @@
                 document.getElementById('userDisplayEmail').innerText = user.email;
                 switchRole('admin');
                 startListeners();
+                prepareNextId();
             } else {
                 currentUser = null;
                 loginSection.classList.remove('hidden');
@@ -109,29 +110,55 @@
         };
 
         // --- LOGIQUE MÉTIER ---
+        const prepareNextId = () => {
+            nextGeneratedId = "CT-" + Math.floor(Math.random() * 900000 + 100000);
+            const idDisplay = document.getElementById('displayNextId');
+            const idInput = document.getElementById('visibleIdInput');
+            if (idDisplay) idDisplay.innerText = nextGeneratedId;
+            if (idInput) idInput.value = nextGeneratedId;
+        };
+
         window.genererMission = async () => {
             if (!currentUser) return;
-            const client = document.getElementById('clientNom').value;
-            const dep = document.getElementById('ptDepart').value;
-            const arr = document.getElementById('ptArrivee').value;
             
-            if (!client) return showToast("Nom du client requis", "error");
+            const fields = {
+                client: document.getElementById('clientNom').value,
+                telephone: document.getElementById('clientTel').value,
+                depart: document.getElementById('ptDepart').value,
+                arrivee: document.getElementById('ptArrivee').value,
+                contenu: document.getElementById('colisContenu').value,
+                service: document.getElementById('typeService').value,
+                prix: document.getElementById('prixLivraison').value
+            };
+            
+            if (!fields.client || !fields.telephone) {
+                return showToast("Nom et Téléphone requis", "error");
+            }
 
-            const id = "CT-" + Math.floor(Math.random() * 900000 + 100000);
+            const id = nextGeneratedId;
             const missionRef = doc(db, 'artifacts', appId, 'public', 'data', 'missions', id);
 
             try {
                 await setDoc(missionRef, {
-                    id, client, depart: dep, arrivee: arr,
+                    ...fields,
+                    id,
                     statut: 'en_attente',
                     created_at: serverTimestamp(),
                     created_by: currentUser.uid,
                     creator_email: currentUser.email
                 });
-                showToast(`Mission ${id} créée !`, "success");
+                showToast(`Colis ${id} enregistré !`, "success");
+                
+                // Reset formulaire
                 document.getElementById('clientNom').value = "";
+                document.getElementById('clientTel').value = "";
+                document.getElementById('colisContenu').value = "";
+                document.getElementById('prixLivraison').value = "";
+                
+                // Préparer le prochain ID
+                prepareNextId();
             } catch (e) {
-                showToast("Erreur de permission base de données", "error");
+                showToast("Erreur de sauvegarde", "error");
             }
         };
 
@@ -187,7 +214,6 @@
                 renderUI(missions);
             }, (error) => {
                 console.error("Erreur Firestore:", error);
-                showToast("Erreur de synchronisation", "error");
             });
         };
 
@@ -202,22 +228,33 @@
             let arcCount = 0;
             missions.sort((a,b) => (b.created_at?.seconds || 0) - (a.created_at?.seconds || 0)).forEach(m => {
                 if (m.statut === 'en_attente') {
-                    containers.dispatch.innerHTML += `<div class="flex justify-between items-center p-4 bg-white border border-slate-100 rounded-xl mb-2 shadow-sm">
-                        <div class="text-xs font-bold">${m.id}<br><span class="font-normal text-slate-500">${m.depart} → ${m.arrivee}</span></div>
-                        <button onclick="publierMission('${m.id}')" class="bg-blue-600 text-white text-[10px] px-3 py-2 rounded-lg font-bold">PUBLIER</button>
+                    containers.dispatch.innerHTML += `<div class="p-4 bg-white border border-slate-100 rounded-2xl mb-3 shadow-sm space-y-2">
+                        <div class="flex justify-between items-center">
+                            <span class="text-xs font-black text-slate-900">${m.id}</span>
+                            <span class="text-[9px] font-bold px-2 py-0.5 rounded bg-slate-100 uppercase">${m.service}</span>
+                        </div>
+                        <p class="text-[11px] text-slate-600"><b>${m.client}</b> (${m.telephone})<br>${m.depart} → ${m.arrivee}</p>
+                        <button onclick="publierMission('${m.id}')" class="w-full bg-blue-600 text-white text-[10px] py-2 rounded-xl font-bold">LANCER DISPATCH</button>
                     </div>`;
                 } else if (m.statut === 'publie') {
-                    containers.livreur.innerHTML += `<div class="p-4 bg-amber-50 border border-amber-200 rounded-2xl mb-4 space-y-3">
-                        <div class="flex justify-between font-black text-amber-900"><span>${m.id}</span><span class="text-[10px] bg-amber-200 px-2 py-1 rounded">EN COURS</span></div>
-                        <p class="text-xs text-amber-800 font-medium"><b>Client:</b> ${m.client}<br><b>Trajet:</b> ${m.depart} vers ${m.arrivee}</p>
-                        <button onclick="openCamera('${m.id}')" class="w-full bg-amber-500 text-white font-bold py-3 rounded-xl shadow-md">SCANNER PREUVE</button>
+                    containers.livreur.innerHTML += `<div class="p-5 bg-amber-50 border border-amber-200 rounded-3xl mb-4 space-y-3">
+                        <div class="flex justify-between font-black text-amber-900 items-center">
+                            <span>${m.id}</span>
+                            <span class="text-[9px] bg-amber-500 text-white px-2 py-1 rounded-full">EN COURS</span>
+                        </div>
+                        <div class="text-[11px] text-amber-800 space-y-1">
+                            <p><b>Client:</b> ${m.client}</p>
+                            <p><b>Contenu:</b> ${m.contenu || 'Non spécifié'}</p>
+                            <p><b>Destination:</b> ${m.arrivee}</p>
+                        </div>
+                        <button onclick="openCamera('${m.id}')" class="w-full bg-amber-500 text-white font-bold py-4 rounded-2xl shadow-lg active:scale-95 transition-transform">VALIDER LIVRAISON</button>
                     </div>`;
                 } else if (m.statut === 'livre') {
                     arcCount++;
                     containers.archives.innerHTML += `<tr class="border-b border-slate-700 text-[10px]">
                         <td class="p-3 text-yellow-500 font-bold">${m.id}</td>
-                        <td class="p-3">${m.depart}<br>→ ${m.arrivee}</td>
-                        <td class="p-3"><img src="${m.photoUrl}" class="w-8 h-8 rounded cursor-pointer" onclick="window.open('${m.photoUrl}')"></td>
+                        <td class="p-3">${m.client}<br><span class="text-slate-500">${m.arrivee}</span></td>
+                        <td class="p-3"><img src="${m.photoUrl}" class="w-10 h-10 rounded-lg object-cover cursor-pointer" onclick="window.open('${m.photoUrl}')"></td>
                         <td class="p-3 text-slate-500">${new Date(m.livre_le).toLocaleDateString()}</td>
                     </tr>`;
                 }
@@ -235,10 +272,11 @@
     </script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;800&display=swap');
-        body { font-family: 'Plus Jakarta Sans', sans-serif; }
+        body { font-family: 'Plus Jakarta Sans', sans-serif; letter-spacing: -0.01em; }
         .hidden { display: none; }
         .logo-img { max-height: 44px; width: auto; }
         .logo-login { max-height: 140px; width: auto; margin: 0 auto; }
+        input, select, textarea { appearance: none; }
     </style>
 </head>
 <body class="bg-slate-50 min-h-screen">
@@ -300,34 +338,123 @@
         </nav>
 
         <div class="max-w-xl mx-auto p-4 space-y-6 mt-4">
+            <!-- SECTION RELAIS : FORMULAIRE ENRICHI -->
             <section id="rubrique1" class="role-section">
-                <div class="bg-white rounded-3xl shadow-lg border border-slate-100 overflow-hidden">
-                    <div class="bg-emerald-600 p-5 text-white font-extrabold flex items-center gap-2"><span>📦</span> Relais : Création</div>
-                    <div class="p-6 space-y-4">
-                        <input type="text" id="clientNom" placeholder="Nom du client" class="w-full p-4 bg-slate-50 rounded-2xl font-bold text-sm border-2 border-transparent focus:border-emerald-500 outline-none">
-                        <div class="grid grid-cols-2 gap-2">
-                            <select id="ptDepart" class="p-3 bg-slate-50 rounded-xl text-xs font-bold"><option>Nzeng-Ayong</option><option>Akanda</option><option>Owendo</option></select>
-                            <select id="ptArrivee" class="p-3 bg-slate-50 rounded-xl text-xs font-bold"><option>Akanda</option><option>Owendo</option><option>Louis</option></select>
+                <div class="bg-white rounded-[2.5rem] shadow-xl border border-slate-100 overflow-hidden">
+                    <div class="bg-emerald-600 p-6 text-white flex items-center justify-between">
+                        <div class="flex items-center gap-3">
+                            <span class="text-2xl">📦</span>
+                            <div>
+                                <h2 class="font-black text-sm uppercase tracking-tighter leading-none">Réception Colis</h2>
+                                <p class="text-[10px] text-emerald-100 opacity-80">Enregistrement nouveau départ</p>
+                            </div>
                         </div>
-                        <button onclick="genererMission()" class="w-full bg-emerald-600 text-white font-black py-4 rounded-2xl shadow-lg">ENREGISTRER COLIS</button>
+                        <div class="bg-emerald-900/30 px-3 py-1.5 rounded-xl border border-emerald-400/20">
+                            <span class="text-[10px] font-black uppercase tracking-wider block opacity-70">Suivi ID</span>
+                            <span id="displayNextId" class="text-xs font-black font-mono">CT-XXXXXX</span>
+                        </div>
+                    </div>
+                    
+                    <div class="p-8 space-y-5">
+                        <!-- Champ ID Visible mais verrouillé -->
+                        <div class="space-y-1">
+                            <label class="text-[10px] font-black text-slate-400 uppercase ml-2 tracking-widest">Identifiant de suivi (Généré)</label>
+                            <input type="text" id="visibleIdInput" readonly class="w-full p-4 bg-slate-100 rounded-2xl font-black text-sm border-2 border-slate-200 text-slate-500 outline-none cursor-not-allowed font-mono">
+                        </div>
+
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <div class="space-y-1">
+                                <label class="text-[10px] font-black text-slate-400 uppercase ml-2">Expéditeur</label>
+                                <input type="text" id="clientNom" placeholder="Nom complet" class="w-full p-4 bg-slate-50 rounded-2xl font-bold text-sm border-2 border-transparent focus:border-emerald-500 outline-none transition-all">
+                            </div>
+                            <div class="space-y-1">
+                                <label class="text-[10px] font-black text-slate-400 uppercase ml-2">Téléphone Client</label>
+                                <input type="tel" id="clientTel" placeholder="+241 0X XX XX XX" class="w-full p-4 bg-slate-50 rounded-2xl font-bold text-sm border-2 border-transparent focus:border-emerald-500 outline-none transition-all">
+                            </div>
+                        </div>
+
+                        <div class="space-y-1">
+                            <label class="text-[10px] font-black text-slate-400 uppercase ml-2">Description du contenu</label>
+                            <textarea id="colisContenu" rows="2" placeholder="Ex: Documents fragiles, Électronique..." class="w-full p-4 bg-slate-50 rounded-2xl font-bold text-sm border-2 border-transparent focus:border-emerald-500 outline-none transition-all"></textarea>
+                        </div>
+
+                        <div class="grid grid-cols-2 gap-4">
+                            <div class="space-y-1">
+                                <label class="text-[10px] font-black text-slate-400 uppercase ml-2">Point de Départ</label>
+                                <select id="ptDepart" class="w-full p-4 bg-slate-50 rounded-2xl font-bold text-sm border-2 border-transparent focus:border-emerald-500 outline-none">
+                                    <option>Nzeng-Ayong</option>
+                                    <option>Akanda</option>
+                                    <option>Owendo</option>
+                                    <option>Louis</option>
+                                    <option>Glass</option>
+                                </select>
+                            </div>
+                            <div class="space-y-1">
+                                <label class="text-[10px] font-black text-slate-400 uppercase ml-2">Point d'Arrivée</label>
+                                <select id="ptArrivee" class="w-full p-4 bg-slate-50 rounded-2xl font-bold text-sm border-2 border-transparent focus:border-emerald-500 outline-none">
+                                    <option>Akanda</option>
+                                    <option>Owendo</option>
+                                    <option>Louis</option>
+                                    <option>Nzeng-Ayong</option>
+                                    <option>Okala</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div class="grid grid-cols-2 gap-4">
+                            <div class="space-y-1">
+                                <label class="text-[10px] font-black text-slate-400 uppercase ml-2">Type de Service</label>
+                                <select id="typeService" class="w-full p-4 bg-slate-50 rounded-2xl font-bold text-sm border-2 border-transparent focus:border-emerald-500 outline-none">
+                                    <option value="standard">Standard (24h)</option>
+                                    <option value="express">Express (3h)</option>
+                                    <option value="prioritaire">Prioritaire (1h)</option>
+                                </select>
+                            </div>
+                            <div class="space-y-1">
+                                <label class="text-[10px] font-black text-slate-400 uppercase ml-2">Prix (FCFA)</label>
+                                <input type="number" id="prixLivraison" placeholder="2500" class="w-full p-4 bg-slate-50 rounded-2xl font-bold text-sm border-2 border-transparent focus:border-emerald-500 outline-none transition-all">
+                            </div>
+                        </div>
+
+                        <button onclick="genererMission()" class="w-full bg-emerald-600 text-white font-black py-5 rounded-[1.5rem] shadow-xl hover:bg-emerald-700 transition-all active:scale-[0.98] mt-4 flex items-center justify-center gap-2 tracking-tighter">
+                            <span>🚀</span> ENREGISTRER LE COLIS <span id="btnIdRef" class="opacity-50 text-[10px] ml-1"></span>
+                        </button>
                     </div>
                 </div>
             </section>
 
             <section id="rubrique2" class="role-section">
-                <h3 class="text-xs font-black text-slate-400 uppercase tracking-widest mb-3 ml-2">En attente de Dispatch</h3>
+                <h3 class="text-xs font-black text-slate-400 uppercase tracking-widest mb-3 ml-4">Colis en attente de Dispatch</h3>
                 <div id="containerDispatch"></div>
             </section>
 
             <section id="rubrique3" class="role-section">
-                <h3 class="text-xs font-black text-slate-400 uppercase tracking-widest mb-3 ml-2">Missions Disponibles</h3>
+                <h3 class="text-xs font-black text-slate-400 uppercase tracking-widest mb-3 ml-4">Missions Disponibles (Livreur)</h3>
                 <div id="containerLivreur"></div>
             </section>
 
             <section id="rubrique4" class="role-section">
-                <div class="bg-slate-900 rounded-3xl overflow-hidden shadow-2xl">
-                    <div class="p-5 flex justify-between items-center"><h2 class="text-white font-black text-xs">ARCHIVES GLOBALES</h2><span id="archiveCount" class="text-yellow-400 font-bold text-xs">0</span></div>
-                    <div class="overflow-x-auto"><table class="w-full text-left"><tbody id="archiveBody"></tbody></table></div>
+                <div class="bg-slate-900 rounded-[2.5rem] overflow-hidden shadow-2xl">
+                    <div class="p-6 flex justify-between items-center border-b border-slate-800">
+                        <div>
+                            <h2 class="text-white font-black text-sm uppercase">Archives Globales</h2>
+                            <p class="text-[9px] text-slate-500">Historique des livraisons réussies</p>
+                        </div>
+                        <span id="archiveCount" class="bg-yellow-500 text-slate-900 font-black text-[10px] px-3 py-1 rounded-full">0</span>
+                    </div>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left">
+                            <thead class="bg-slate-800 text-slate-400 text-[9px] uppercase font-black tracking-widest">
+                                <tr>
+                                    <th class="p-4">ID</th>
+                                    <th class="p-4">Client</th>
+                                    <th class="p-4">Preuve</th>
+                                    <th class="p-4">Date</th>
+                                </tr>
+                            </thead>
+                            <tbody id="archiveBody"></tbody>
+                        </table>
+                    </div>
                 </div>
             </section>
         </div>
@@ -335,12 +462,14 @@
 
     <!-- MODAL CAMÉRA -->
     <div id="cameraModal" class="fixed inset-0 bg-slate-950/95 z-[300] hidden flex flex-col items-center justify-center p-6 text-white text-center">
-        <div class="w-16 h-16 bg-amber-500 rounded-full flex items-center justify-center mb-6 text-2xl animate-bounce">📷</div>
-        <h2 class="text-xl font-black mb-2">Preuve de Livraison</h2>
-        <p class="text-xs text-slate-400 mb-8 max-w-xs">Prenez une photo du colis entre les mains du destinataire.</p>
+        <div class="w-20 h-20 bg-amber-500 rounded-full flex items-center justify-center mb-6 text-3xl animate-pulse">📸</div>
+        <h2 class="text-2xl font-black mb-2">Preuve de Livraison</h2>
+        <p class="text-xs text-slate-400 mb-10 max-w-xs">Photographiez le colis déposé ou le destinataire avec le colis.</p>
         <input type="file" id="fileInput" accept="image/*" capture="camera" class="hidden" onchange="processImage(this.files[0])">
-        <button onclick="document.getElementById('fileInput').click()" class="w-full max-w-xs bg-white text-slate-900 font-black py-5 rounded-2xl text-lg shadow-2xl">OUVRIR LA CAMÉRA</button>
-        <button onclick="document.getElementById('cameraModal').classList.add('hidden')" class="mt-6 text-slate-500 text-xs font-bold underline uppercase">Fermer</button>
+        <button onclick="document.getElementById('fileInput').click()" class="w-full max-w-xs bg-white text-slate-900 font-black py-6 rounded-[2rem] text-lg shadow-2xl hover:scale-105 transition-transform">
+            ACTIVER L'APPAREIL PHOTO
+        </button>
+        <button onclick="document.getElementById('cameraModal').classList.add('hidden')" class="mt-8 text-slate-500 text-xs font-bold underline uppercase tracking-widest">Annuler la procédure</button>
     </div>
 
 </body>
