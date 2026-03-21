@@ -396,8 +396,7 @@
                             </p>
                         </div>
                         <div class="text-right">
-                            <img src="https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=tel:%2B24177736065" 
-         alt="QR Code Appel +24177736065" 
+                        <img src="https://api.qrserver.com/v1/create-qr-code/?size=100x100&data=tel:"24177736065" class="w-16 h-16 ml-auto mb-2 opacity-80 grayscale">
          style="border: 1px solid #ccc; padding: 10px; border-radius: 8px;">
 </div>
                             <p class="text-[7px] font-black uppercase tracking-widest text-slate-400">Authentification CT241 Express</p>
