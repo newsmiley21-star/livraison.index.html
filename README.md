@@ -12,7 +12,7 @@
     <meta name="apple-mobile-web-app-title" content="CT241 Log">
     <link rel="apple-touch-icon" href="https://i.ibb.co/q3t8t3Rj/Gemini-Generated-Image-1pvtp31pvtp31pvt.png">
 
-    <!-- Manifeste Inline -->
+    <!-- Manifeste Inline pour l'installabilité -->
     <link rel="manifest" id="pwa-manifest">
     
     <link rel="icon" type="image/png" href="https://i.ibb.co/q3t8t3Rj/Gemini-Generated-Image-1pvtp31pvtp31pvt.png">
@@ -21,7 +21,7 @@
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-app.js";
         import { getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-auth.js";
-        import { getFirestore, collection, doc, setDoc, updateDoc, onSnapshot, query, where, orderBy, limit } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-firestore.js";
+        import { getFirestore, collection, doc, setDoc, updateDoc, onSnapshot, query, where, orderBy } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-firestore.js";
 
         // CONFIGURATION FIREBASE
         const firebaseConfig = {
@@ -42,9 +42,9 @@
         let currentUser = null;
         let userRole = null;
         let allMissions = [];
-        let currentFilter = 'all';
+        let currentTab = 'all';
 
-        // --- PWA MANIFEST ---
+        // --- PWA MANIFEST GENERATION ---
         const manifest = {
             "name": "CT241 Logistique",
             "short_name": "CT241",
@@ -63,15 +63,15 @@
             const pass = document.getElementById('loginPass').value;
             const btn = document.getElementById('loginBtn');
             btn.disabled = true;
-            btn.innerHTML = '<span class="animate-spin inline-block mr-2">⏳</span> Connexion...';
+            btn.innerHTML = '<span class="animate-spin inline-block mr-2">⏳</span> Authentification...';
             
             try {
                 await signInWithEmailAndPassword(auth, email, pass);
             } catch (err) {
-                document.getElementById('loginError').innerText = "Accès refusé. Vérifiez vos identifiants.";
+                document.getElementById('loginError').innerText = "Identifiants incorrects.";
                 document.getElementById('loginError').classList.remove('hidden');
                 btn.disabled = false;
-                btn.innerText = "Se connecter";
+                btn.innerText = "SE CONNECTER";
             }
         };
 
@@ -97,19 +97,23 @@
             else userRole = 'relais';
             
             document.getElementById('userBadge').innerText = userRole.toUpperCase();
-            const badgeColors = { admin: 'bg-red-500', livreur: 'bg-amber-500', relais: 'bg-emerald-500' };
-            document.getElementById('userBadge').className = `${badgeColors[userRole]} text-[10px] text-white px-3 py-1 rounded-full font-black tracking-widest`;
+            const badgeClasses = {
+                admin: 'bg-red-500 shadow-red-200',
+                livreur: 'bg-amber-500 shadow-amber-200',
+                relais: 'bg-indigo-500 shadow-indigo-200'
+            };
+            document.getElementById('userBadge').className = `${badgeClasses[userRole]} text-[10px] text-white px-4 py-1.5 rounded-full font-black tracking-widest shadow-lg`;
 
-            // Filtrage des sections UI
+            // Affichage conditionnel des sections
             document.querySelectorAll('.role-view').forEach(v => v.classList.add('hidden'));
             if(userRole === 'admin') document.querySelectorAll('.role-view').forEach(v => v.classList.remove('hidden'));
-            else if(userRole === 'livreur') document.getElementById('livreurDashboard').classList.remove('hidden');
-            else document.getElementById('relaisDashboard').classList.remove('hidden');
+            else if(userRole === 'livreur') document.getElementById('livreurSection').classList.remove('hidden');
+            else document.getElementById('relaisSection').classList.remove('hidden');
         };
 
-        // --- DATA SYNC (Optimisation 48h) ---
+        // --- SYNCHRONISATION (Optimisation 48h) ---
         const initDataSync = () => {
-            const limitTime = Date.now() - (48 * 60 * 60 * 1000);
+            const limitTime = Date.now() - (48 * 60 * 60 * 1000); // 48h glissantes
             const q = query(
                 collection(db, 'artifacts', appId, 'public', 'data', 'missions'),
                 where('ca', '>', limitTime)
@@ -118,287 +122,326 @@
             onSnapshot(q, (snap) => {
                 allMissions = [];
                 snap.forEach(doc => allMissions.push(doc.data()));
-                render();
+                renderUI();
             });
         };
 
-        // --- ACTIONS ---
+        // --- ACTIONS MÉTIERS ---
         window.creerMission = async () => {
-            const id = "CT-" + Math.floor(100000 + Math.random() * 900000);
+            const id = "CT" + Math.floor(100000 + Math.random() * 900000);
             const data = {
                 id,
-                s: 0, // 0: Attente, 1: En Cours, 2: Livré
+                s: 0, // Statut : 0=Attente, 1=Récupéré, 2=Livré
                 en: document.getElementById('en').value,
                 eq: document.getElementById('eq').value,
                 et: document.getElementById('et').value,
                 dn: document.getElementById('dn').value,
                 dq: document.getElementById('dq').value,
                 dt: document.getElementById('dt').value,
-                n: parseInt(document.getElementById('n').value), // Nature
                 p: parseInt(document.getElementById('p').value) || 0,
-                r: parseInt(document.getElementById('r').value), // Règlement
+                r: parseInt(document.getElementById('r').value) || 0, // 0: Cash, 1: Airtel, 2: Moov
                 ce: currentUser.email,
                 ca: Date.now()
             };
 
-            if(!data.dn || !data.dt || !data.p) return alert("Veuillez remplir les champs obligatoires (Destinataire, Tél, Prix)");
+            if(!data.dn || !data.dt || !data.p) return alert("Les champs Destinataire, Tél et Prix sont obligatoires.");
 
             await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'missions', id), data);
-            alert("✅ Expédition enregistrée !");
-            document.querySelectorAll('#relaisDashboard input').forEach(i => i.value = "");
+            alert("✅ Envoi enregistré avec succès !");
+            document.querySelectorAll('#relaisSection input').forEach(i => i.value = "");
         };
 
-        window.validerLivraison = (id) => {
-            window.targetMissionId = id;
+        window.ouvrirCamera = (id) => {
+            window.targetId = id;
             document.getElementById('cameraModal').classList.remove('hidden');
         };
 
         window.processImage = (file) => {
+            if(!file) return;
             const reader = new FileReader();
             reader.onload = (e) => {
                 const img = new Image();
                 img.onload = () => {
                     const canvas = document.createElement('canvas');
                     const MAX = 800;
-                    canvas.width = MAX;
-                    canvas.height = img.height * (MAX / img.width);
+                    let w = img.width;
+                    let h = img.height;
+                    if (w > MAX) { h *= MAX / w; w = MAX; }
+                    canvas.width = w; canvas.height = h;
                     const ctx = canvas.getContext('2d');
-                    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-                    const base64 = canvas.toDataURL('image/jpeg', 0.6); // Compression optimale
-                    saveLivraison(base64);
+                    ctx.drawImage(img, 0, 0, w, h);
+                    const base64 = canvas.toDataURL('image/jpeg', 0.6);
+                    validerMission(base64);
                 };
                 img.src = e.target.result;
             };
             reader.readAsDataURL(file);
         };
 
-        const saveLivraison = async (photo) => {
-            await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'missions', window.targetMissionId), {
+        const validerMission = async (photo) => {
+            await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'missions', window.targetId), {
                 s: 2,
-                le: currentUser.email,
                 img: photo,
-                lk: new Date().toISOString().split('T')[0]
+                lk: Date.now(),
+                le: currentUser.email
             });
             document.getElementById('cameraModal').classList.add('hidden');
+            alert("🚀 Livraison confirmée !");
         };
 
-        // --- UI RENDER ---
-        window.setFilter = (f) => { currentFilter = f; render(); };
+        // --- RENDU UI ---
+        window.switchTab = (tab) => {
+            currentTab = tab;
+            renderUI();
+        };
 
-        const render = () => {
-            // Stats (Admin)
+        const renderUI = () => {
+            // Stats Admin
             if(userRole === 'admin') {
-                const ca = allMissions.filter(m => m.s === 2).reduce((sum, m) => sum + m.p, 0);
-                const count = allMissions.filter(m => m.s === 2).length;
-                document.getElementById('statCa').innerText = ca.toLocaleString() + " CFA";
-                document.getElementById('statCount').innerText = count;
+                const totalCA = allMissions.filter(m => m.s === 2).reduce((sum, m) => sum + m.p, 0);
+                const totalColis = allMissions.length;
+                document.getElementById('statCA').innerText = totalCA.toLocaleString() + " CFA";
+                document.getElementById('statCount').innerText = totalColis;
             }
 
-            // Listes
-            const lists = [document.getElementById('listAll'), document.getElementById('listLiv')];
-            lists.forEach(l => { if(l) l.innerHTML = ""; });
+            const container = document.getElementById('missionContainer');
+            container.innerHTML = "";
 
-            const sorted = allMissions.sort((a,b) => b.ca - a.ca);
+            let filtered = allMissions.sort((a,b) => b.ca - a.ca);
+            if(currentTab === 'liv') filtered = filtered.filter(m => m.s === 2);
+            if(currentTab === 'wait') filtered = filtered.filter(m => m.s < 2);
 
-            sorted.forEach(m => {
-                const isMine = m.ce === currentUser.email || userRole === 'admin' || userRole === 'livreur';
-                if(!isMine) return;
+            // Filtrage par rôle (Relais ne voit que les siens)
+            if(userRole === 'relais') filtered = filtered.filter(m => m.ce === currentUser.email);
 
-                const card = `
-                    <div onclick="showDetail('${m.id}')" class="bg-white p-5 rounded-3xl border border-slate-100 shadow-sm mb-4 active:scale-95 transition-transform">
-                        <div class="flex justify-between items-start mb-3">
-                            <span class="text-[9px] font-black text-slate-400 uppercase tracking-tighter">#${m.id}</span>
-                            <span class="${m.s === 2 ? 'bg-emerald-100 text-emerald-600' : 'bg-amber-100 text-amber-600'} text-[8px] px-2 py-1 rounded-full font-black uppercase">
-                                ${m.s === 2 ? 'Livré' : 'Attente'}
-                            </span>
-                        </div>
-                        <div class="text-sm font-black text-slate-800">${m.dn}</div>
-                        <div class="text-[10px] text-slate-400 font-bold uppercase tracking-wide">${m.dq}</div>
-                        ${m.s < 2 && userRole !== 'relais' ? `
-                            <button onclick="event.stopPropagation(); validerLivraison('${m.id}')" class="mt-4 w-full bg-slate-900 text-white py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest">Confirmer Livraison</button>
+            filtered.forEach(m => {
+                const div = document.createElement('div');
+                div.className = "bg-white p-6 rounded-[2rem] shadow-sm border border-slate-100 mb-4 active:scale-[0.98] transition-all cursor-pointer";
+                div.onclick = () => showDetail(m.id);
+                
+                div.innerHTML = `
+                    <div class="flex justify-between items-start mb-4">
+                        <span class="text-[9px] font-black text-slate-300 tracking-tighter uppercase">#${m.id}</span>
+                        <span class="${m.s === 2 ? 'bg-emerald-100 text-emerald-600' : 'bg-amber-100 text-amber-600'} text-[8px] px-3 py-1 rounded-full font-black uppercase tracking-widest">
+                            ${m.s === 2 ? 'Livré' : 'En Attente'}
+                        </span>
+                    </div>
+                    <div class="space-y-1">
+                        <h4 class="text-sm font-black text-slate-800 uppercase">${m.dn}</h4>
+                        <p class="text-[10px] text-slate-400 font-bold uppercase tracking-wide">${m.dq}</p>
+                    </div>
+                    <div class="mt-4 pt-4 border-t border-slate-50 flex justify-between items-center">
+                        <span class="text-xs font-black text-slate-900">${m.p.toLocaleString()} FCFA</span>
+                        ${m.s < 2 && (userRole === 'admin' || userRole === 'livreur') ? `
+                            <button onclick="event.stopPropagation(); ouvrirCamera('${m.id}')" class="bg-slate-900 text-white px-4 py-2 rounded-xl text-[9px] font-black uppercase tracking-widest">Valider</button>
                         ` : ''}
                     </div>
                 `;
+                container.appendChild(div);
+            });
 
-                if(document.getElementById('listAll')) document.getElementById('listAll').innerHTML += card;
-                if(m.s === 2 && document.getElementById('listLiv')) document.getElementById('listLiv').innerHTML += card;
+            // Update tab styles
+            document.querySelectorAll('.tab-btn').forEach(btn => {
+                const btnTab = btn.getAttribute('data-tab');
+                if(btnTab === currentTab) {
+                    btn.className = "tab-btn bg-slate-900 text-white px-6 py-2.5 rounded-2xl text-[10px] font-black uppercase tracking-widest";
+                } else {
+                    btn.className = "tab-btn bg-white text-slate-400 border border-slate-100 px-6 py-2.5 rounded-2xl text-[10px] font-black uppercase tracking-widest";
+                }
             });
         };
 
         window.showDetail = (id) => {
             const m = allMissions.find(x => x.id === id);
+            const modal = document.getElementById('detailModal');
             const content = document.getElementById('detailContent');
+            
             content.innerHTML = `
-                <div class="p-8 space-y-6">
-                    <div class="flex justify-between items-center border-b pb-6">
+                <div class="p-8 space-y-8">
+                    <div class="flex justify-between items-center border-b border-slate-100 pb-6">
                         <img src="https://i.ibb.co/q3t8t3Rj/Gemini-Generated-Image-1pvtp31pvtp31pvt.png" class="h-12">
                         <div class="text-right">
-                            <p class="text-[10px] font-black text-slate-400 uppercase">Bon d'expédition</p>
-                            <p class="text-xl font-black text-slate-900">${m.id}</p>
+                            <p class="text-[10px] font-black text-slate-400 uppercase tracking-widest">Bon d'expédition</p>
+                            <p class="text-xl font-black text-slate-900">#${m.id}</p>
                         </div>
                     </div>
-                    <div class="grid grid-cols-2 gap-8 text-[11px]">
-                        <div class="space-y-1">
-                            <p class="font-black text-slate-400 uppercase tracking-widest text-[9px]">Expéditeur</p>
-                            <p class="font-black text-slate-800 text-sm">${m.en}</p>
-                            <p class="text-slate-500 font-bold">${m.eq}</p>
-                            <p class="text-slate-500 font-bold">${m.et || ''}</p>
-                        </div>
-                        <div class="space-y-1">
-                            <p class="font-black text-slate-400 uppercase tracking-widest text-[9px]">Destinataire</p>
-                            <p class="font-black text-slate-800 text-sm">${m.dn}</p>
-                            <p class="text-slate-500 font-bold">${m.dq}</p>
-                            <p class="text-slate-500 font-bold">${m.dt}</p>
-                        </div>
-                    </div>
-                    <div class="bg-slate-50 p-6 rounded-3xl space-y-4">
-                        <div class="flex justify-between text-xs">
-                            <span class="font-bold text-slate-500">Montant Livraison</span>
-                            <span class="font-black text-slate-900">${m.p.toLocaleString()} CFA</span>
-                        </div>
-                        <div class="flex justify-between text-[10px] border-t pt-4">
-                            <span class="text-slate-400 uppercase font-black">Règlement</span>
-                            <span class="font-black">${['CASH', 'AIRTEL', 'MOOV'][m.r || 0]}</span>
-                        </div>
-                    </div>
-                    ${m.img ? `
+
+                    <div class="grid grid-cols-2 gap-8">
                         <div class="space-y-2">
-                            <p class="text-[9px] font-black text-slate-400 uppercase tracking-widest">Preuve Image</p>
-                            <img src="${m.img}" class="w-full rounded-3xl border shadow-sm">
+                            <p class="text-[9px] font-black text-slate-400 uppercase tracking-[0.2em]">Expéditeur</p>
+                            <p class="text-sm font-black text-slate-800">${m.en}</p>
+                            <p class="text-[11px] text-slate-500 font-bold uppercase">${m.eq}</p>
+                            <p class="text-[11px] text-slate-500 font-bold">${m.et || ''}</p>
+                        </div>
+                        <div class="space-y-2 text-right">
+                            <p class="text-[9px] font-black text-slate-400 uppercase tracking-[0.2em]">Destinataire</p>
+                            <p class="text-sm font-black text-slate-800">${m.dn}</p>
+                            <p class="text-[11px] text-slate-500 font-bold uppercase">${m.dq}</p>
+                            <p class="text-[11px] text-slate-500 font-bold">${m.dt}</p>
+                        </div>
+                    </div>
+
+                    <div class="bg-slate-50 p-6 rounded-[2rem] border border-slate-100 space-y-4">
+                        <div class="flex justify-between items-center">
+                            <span class="text-[10px] font-black text-slate-400 uppercase tracking-widest">Montant Course</span>
+                            <span class="text-lg font-black text-slate-900">${m.p.toLocaleString()} CFA</span>
+                        </div>
+                        <div class="flex justify-between items-center pt-4 border-t border-slate-200">
+                            <span class="text-[10px] font-black text-slate-400 uppercase tracking-widest">Règlement</span>
+                            <span class="text-xs font-black uppercase text-indigo-600">${['CASH', 'AIRTEL MONEY', 'MOOV MONEY'][m.r || 0]}</span>
+                        </div>
+                    </div>
+
+                    ${m.img ? `
+                        <div class="space-y-3">
+                            <p class="text-[9px] font-black text-slate-400 uppercase tracking-widest">Preuve de Livraison</p>
+                            <img src="${m.img}" class="w-full rounded-[2rem] shadow-lg border border-slate-100">
                         </div>
                     ` : ''}
                 </div>
             `;
-            document.getElementById('detailModal').classList.remove('hidden');
+            modal.classList.remove('hidden');
         };
 
     </script>
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;800&display=swap');
-        body { font-family: 'Plus Jakarta Sans', sans-serif; background: #f8fafc; color: #1e293b; }
+        @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800&display=swap');
+        body { font-family: 'Plus Jakarta Sans', sans-serif; background: #f8fafc; overflow-x: hidden; }
         .no-scrollbar::-webkit-scrollbar { display: none; }
-        @media print { .no-print { display: none !important; } .print-only { display: block !important; } body { background: white; } }
+        @media print { .no-print { display: none !important; } .print-only { display: block !important; } }
     </style>
 </head>
-<body class="max-w-md mx-auto min-h-screen bg-white shadow-2xl overflow-x-hidden">
+<body class="max-w-md mx-auto min-h-screen bg-white shadow-2xl relative">
 
-    <!-- LOGIN -->
+    <!-- ÉCRAN LOGIN -->
     <section id="authSection" class="fixed inset-0 bg-slate-900 z-[1000] flex items-center justify-center p-8">
-        <div class="w-full bg-white p-10 rounded-[3.5rem] text-center space-y-8 animate-in fade-in zoom-in duration-500">
-            <img src="https://i.ibb.co/q3t8t3Rj/Gemini-Generated-Image-1pvtp31pvtp31pvt.png" class="h-20 mx-auto">
+        <div class="w-full bg-white p-10 rounded-[3.5rem] text-center space-y-10 animate-in fade-in zoom-in duration-500">
+            <img src="https://i.ibb.co/q3t8t3Rj/Gemini-Generated-Image-1pvtp31pvtp31pvt.png" class="h-24 mx-auto drop-shadow-2xl">
             <div>
-                <h1 class="text-2xl font-black text-slate-900">CT241 LOG</h1>
-                <p class="text-slate-400 text-[10px] font-black uppercase tracking-[0.2em]">Logistique & Performance</p>
+                <h1 class="text-3xl font-black text-slate-900 tracking-tighter">CT241 LOG</h1>
+                <p class="text-slate-400 text-[10px] font-black uppercase tracking-[0.3em] mt-1">Plateforme Logistique</p>
             </div>
-            <form onsubmit="handleLogin(event)" class="space-y-4">
-                <input type="email" id="loginEmail" placeholder="Email professionnel" class="w-full p-5 bg-slate-100 rounded-2xl text-xs font-bold outline-none focus:ring-2 ring-slate-200" required>
-                <input type="password" id="loginPass" placeholder="Mot de passe" class="w-full p-5 bg-slate-100 rounded-2xl text-xs font-bold outline-none focus:ring-2 ring-slate-200" required>
-                <p id="loginError" class="text-red-500 text-[10px] font-bold hidden"></p>
-                <button id="loginBtn" class="w-full bg-slate-900 text-white py-5 rounded-2xl font-black text-xs uppercase shadow-2xl tracking-widest active:scale-95 transition-transform">Se connecter</button>
+            <form onsubmit="handleLogin(event)" class="space-y-4 text-left">
+                <div class="space-y-1">
+                    <label class="text-[9px] font-black text-slate-400 uppercase ml-4">Email Pro</label>
+                    <input type="email" id="loginEmail" placeholder="admin@ct241.com" class="w-full p-5 bg-slate-100 rounded-2xl text-xs font-bold outline-none focus:ring-2 ring-indigo-500" required>
+                </div>
+                <div class="space-y-1">
+                    <label class="text-[9px] font-black text-slate-400 uppercase ml-4">Clé d'accès</label>
+                    <input type="password" id="loginPass" placeholder="••••••••" class="w-full p-5 bg-slate-100 rounded-2xl text-xs font-bold outline-none focus:ring-2 ring-indigo-500" required>
+                </div>
+                <p id="loginError" class="text-red-500 text-[10px] font-bold hidden text-center"></p>
+                <button id="loginBtn" class="w-full bg-slate-900 text-white py-6 rounded-2xl font-black text-xs uppercase shadow-2xl tracking-[0.2em] active:scale-95 transition-transform">Se connecter</button>
             </form>
         </div>
     </section>
 
-    <!-- MAIN APP -->
-    <main id="appContent" class="hidden pb-24">
+    <!-- CONTENU PRINCIPAL -->
+    <main id="appContent" class="hidden pb-32">
         <!-- HEADER -->
-        <header class="p-6 sticky top-0 bg-white/80 backdrop-blur-xl z-50 flex justify-between items-center border-b border-slate-50 no-print">
+        <header class="p-6 sticky top-0 bg-white/80 backdrop-blur-xl z-[100] border-b border-slate-50 flex justify-between items-center no-print">
             <div class="flex items-center gap-4">
                 <img src="https://i.ibb.co/q3t8t3Rj/Gemini-Generated-Image-1pvtp31pvtp31pvt.png" class="h-10">
-                <div id="userBadge">...</div>
+                <div id="userBadge" class="animate-pulse">...</div>
             </div>
-            <button onclick="handleLogout()" class="h-12 w-12 bg-slate-100 rounded-2xl flex items-center justify-center text-xl hover:bg-slate-200 transition-colors">🚪</button>
+            <button onclick="handleLogout()" class="h-12 w-12 bg-slate-50 rounded-2xl flex items-center justify-center text-xl hover:bg-slate-100 transition-colors">👋</button>
         </header>
 
-        <div class="p-6 space-y-8 no-print">
+        <div class="p-6 space-y-10 no-print">
             
-            <!-- ADMIN VIEW -->
+            <!-- VUE ADMIN : STATS -->
             <section class="role-view hidden space-y-4">
                 <div class="grid grid-cols-2 gap-4">
-                    <div class="bg-slate-900 p-6 rounded-[2.5rem] text-white shadow-xl relative overflow-hidden">
-                        <p class="text-[8px] font-black text-slate-500 uppercase tracking-widest mb-1">CA (48h)</p>
-                        <h2 id="statCa" class="text-lg font-black text-emerald-400">0 CFA</h2>
-                        <div class="absolute -right-4 -bottom-4 h-12 w-12 bg-white/5 rounded-full"></div>
+                    <div class="bg-indigo-600 p-7 rounded-[2.5rem] text-white shadow-xl shadow-indigo-100 relative overflow-hidden">
+                        <p class="text-[9px] font-black text-indigo-300 uppercase tracking-widest mb-1">Chiffre d'affaires</p>
+                        <h2 id="statCA" class="text-xl font-black">0 CFA</h2>
+                        <div class="absolute -right-4 -bottom-4 opacity-10 text-6xl">💰</div>
                     </div>
-                    <div class="bg-slate-100 p-6 rounded-[2.5rem] text-slate-900 shadow-sm">
-                        <p class="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">Livraisons</p>
-                        <h2 id="statCount" class="text-lg font-black">0</h2>
+                    <div class="bg-white border border-slate-100 p-7 rounded-[2.5rem] shadow-sm">
+                        <p class="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Total Expéditions</p>
+                        <h2 id="statCount" class="text-xl font-black text-slate-900">0</h2>
                     </div>
                 </div>
             </section>
 
-            <!-- DASHBOARD RELAIS (CRÉATION) -->
-            <section id="relaisDashboard" class="role-view hidden space-y-6">
-                <div class="bg-slate-50 p-8 rounded-[3rem] space-y-6 border border-slate-100">
-                    <h3 class="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Nouvelle Course</h3>
-                    <div class="space-y-3">
-                        <input type="text" id="en" placeholder="Nom Boutique Exp" class="w-full p-4 bg-white rounded-xl text-xs font-bold outline-none shadow-sm">
+            <!-- VUE RELAIS : CRÉATION -->
+            <section id="relaisSection" class="role-view hidden">
+                <div class="bg-slate-900 p-8 rounded-[3rem] shadow-2xl text-white space-y-8">
+                    <h3 class="text-xs font-black uppercase tracking-[0.2em] flex items-center gap-3">
+                        <span class="w-8 h-8 bg-white/10 rounded-full flex items-center justify-center text-lg">📦</span>
+                        Nouvel Envoi
+                    </h3>
+                    
+                    <div class="space-y-4">
+                        <div class="grid grid-cols-1 gap-3">
+                            <input type="text" id="en" placeholder="Nom de la Boutique / Expéditeur" class="w-full p-4 bg-white/5 rounded-xl text-xs font-bold outline-none border border-white/10 placeholder:text-slate-500 focus:bg-white/10">
+                            <div class="grid grid-cols-2 gap-3">
+                                <input type="text" id="eq" placeholder="Quartier Exp" class="p-4 bg-white/5 rounded-xl text-xs font-bold outline-none border border-white/10 placeholder:text-slate-500">
+                                <input type="tel" id="et" placeholder="Téléphone Exp" class="p-4 bg-white/5 rounded-xl text-xs font-bold outline-none border border-white/10 placeholder:text-slate-500">
+                            </div>
+                        </div>
+
+                        <div class="pt-4 border-t border-white/10 grid grid-cols-1 gap-3">
+                            <input type="text" id="dn" placeholder="Nom du Destinataire" class="w-full p-4 bg-white/5 rounded-xl text-xs font-bold outline-none border border-white/10 placeholder:text-slate-500">
+                            <div class="grid grid-cols-2 gap-3">
+                                <input type="text" id="dq" placeholder="Quartier Dest" class="p-4 bg-white/5 rounded-xl text-xs font-bold outline-none border border-white/10 placeholder:text-slate-500">
+                                <input type="tel" id="dt" placeholder="Téléphone Dest" class="p-4 bg-white/5 rounded-xl text-xs font-bold outline-none border border-white/10 placeholder:text-slate-500">
+                            </div>
+                        </div>
+
                         <div class="grid grid-cols-2 gap-3">
-                            <input type="text" id="eq" placeholder="Quartier Exp" class="p-4 bg-white rounded-xl text-xs font-bold outline-none shadow-sm">
-                            <input type="tel" id="et" placeholder="Tél Exp" class="p-4 bg-white rounded-xl text-xs font-bold outline-none shadow-sm">
+                            <select id="r" class="p-4 bg-white/5 rounded-xl text-[10px] font-black uppercase outline-none border border-white/10">
+                                <option value="0" class="text-black">Paiement Cash</option>
+                                <option value="1" class="text-black">Airtel Money</option>
+                                <option value="2" class="text-black">Moov Money</option>
+                            </select>
+                            <input type="number" id="p" placeholder="Prix Livraison" class="p-4 bg-emerald-500 text-white rounded-xl text-xs font-black outline-none placeholder:text-emerald-100">
                         </div>
                     </div>
-                    <hr class="border-slate-200 border-dashed">
-                    <div class="space-y-3">
-                        <input type="text" id="dn" placeholder="Nom Destinataire" class="w-full p-4 bg-white rounded-xl text-xs font-bold outline-none shadow-sm">
-                        <div class="grid grid-cols-2 gap-3">
-                            <input type="text" id="dq" placeholder="Quartier Dest" class="p-4 bg-white rounded-xl text-xs font-bold outline-none shadow-sm">
-                            <input type="tel" id="dt" placeholder="Tél Dest" class="p-4 bg-white rounded-xl text-xs font-bold outline-none shadow-sm">
-                        </div>
-                    </div>
-                    <div class="grid grid-cols-2 gap-3">
-                        <select id="n" class="p-4 bg-white rounded-xl text-xs font-bold outline-none shadow-sm">
-                            <option value="0">Standard</option>
-                            <option value="1">Repas</option>
-                            <option value="2">Documents</option>
-                        </select>
-                        <select id="r" class="p-4 bg-white rounded-xl text-xs font-bold outline-none shadow-sm">
-                            <option value="0">Cash</option>
-                            <option value="1">Airtel Money</option>
-                            <option value="2">Moov Money</option>
-                        </select>
-                    </div>
-                    <input type="number" id="p" placeholder="Prix Livraison (CFA)" class="w-full p-5 bg-slate-900 text-white rounded-2xl text-sm font-black outline-none placeholder:text-slate-600">
-                    <button onclick="creerMission()" class="w-full bg-emerald-600 text-white py-5 rounded-2xl font-black text-xs uppercase tracking-widest shadow-xl active:scale-95 transition-transform">Valider le départ</button>
+
+                    <button onclick="creerMission()" class="w-full bg-white text-slate-900 py-5 rounded-2xl font-black text-xs uppercase tracking-widest shadow-xl active:scale-95 transition-transform">VALIDER LE DÉPART</button>
                 </div>
             </section>
 
-            <!-- TABS & LISTS -->
+            <!-- VUE LISTE (COMMUNE) -->
             <section class="space-y-6">
-                <div class="flex gap-4 overflow-x-auto no-scrollbar pb-2">
-                    <button onclick="setFilter('all')" class="bg-slate-900 text-white px-6 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest flex-shrink-0">Toutes</button>
-                    <button onclick="setFilter('liv')" class="bg-white border text-slate-400 px-6 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest flex-shrink-0">Livrées</button>
+                <div class="flex items-center justify-between mb-2">
+                    <h3 class="text-[10px] font-black text-slate-400 uppercase tracking-widest">Suivi d'activité</h3>
                 </div>
                 
-                <div id="listAll" class="animate-in fade-in slide-in-from-bottom-4 duration-500"></div>
-                <div id="listLiv" class="hidden"></div>
-            </section>
+                <div class="flex gap-3 overflow-x-auto no-scrollbar pb-2">
+                    <button data-tab="all" onclick="switchTab('all')" class="tab-btn">Toutes</button>
+                    <button data-tab="wait" onclick="switchTab('wait')" class="tab-btn">Attente</button>
+                    <button data-tab="liv" onclick="switchTab('liv')" class="tab-btn">Livrées</button>
+                </div>
 
+                <div id="missionContainer" class="animate-in fade-in slide-in-from-bottom-6 duration-700"></div>
+            </section>
         </div>
     </main>
 
-    <!-- DETAIL MODAL -->
-    <div id="detailModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[200] hidden flex items-center justify-center p-4">
-        <div class="w-full max-w-2xl bg-white rounded-[2.5rem] shadow-2xl overflow-y-auto max-h-[90vh]">
+    <!-- MODALE DÉTAILS -->
+    <div id="detailModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[500] hidden flex items-center justify-center p-6">
+        <div class="w-full max-w-lg bg-white rounded-[3rem] shadow-2xl overflow-y-auto max-h-[90vh]">
             <div id="detailContent"></div>
-            <div class="p-6 bg-slate-50 flex gap-2 no-print">
-                <button onclick="window.print()" class="flex-1 bg-slate-900 text-white font-black py-4 rounded-2xl text-[10px] tracking-widest uppercase">🖨️ Imprimer Bon</button>
-                <button onclick="document.getElementById('detailModal').classList.add('hidden')" class="px-6 bg-slate-200 text-slate-600 font-black py-4 rounded-2xl text-[10px] uppercase">Fermer</button>
+            <div class="p-8 bg-slate-50 flex gap-3 no-print">
+                <button onclick="window.print()" class="flex-1 bg-slate-900 text-white font-black py-5 rounded-2xl text-[10px] tracking-widest uppercase shadow-xl">🖨️ Imprimer</button>
+                <button onclick="document.getElementById('detailModal').classList.add('hidden')" class="px-8 bg-white border border-slate-200 text-slate-400 font-black py-5 rounded-2xl text-[10px] uppercase">Fermer</button>
             </div>
         </div>
     </div>
 
-    <!-- CAMERA -->
-    <div id="cameraModal" class="fixed inset-0 bg-black z-[3000] hidden flex flex-col items-center justify-center p-10 text-white">
-        <div class="text-center space-y-8 animate-in zoom-in duration-300">
-            <div class="w-24 h-24 bg-white/10 rounded-full flex items-center justify-center text-5xl mx-auto">📸</div>
-            <div>
-                <h2 class="text-2xl font-black uppercase">Preuve Livraison</h2>
-                <p class="text-slate-500 text-[10px] mt-2 font-bold uppercase tracking-widest">Photographiez le colis ou le bon signé</p>
+    <!-- MODALE CAMERA -->
+    <div id="cameraModal" class="fixed inset-0 bg-black z-[1000] hidden flex flex-col items-center justify-center p-10 text-white">
+        <div class="text-center space-y-10 animate-in zoom-in duration-300">
+            <div class="w-28 h-28 bg-white/10 rounded-full flex items-center justify-center text-6xl mx-auto border border-white/5">📸</div>
+            <div class="space-y-2">
+                <h2 class="text-2xl font-black uppercase tracking-tight">Preuve de Livraison</h2>
+                <p class="text-slate-500 text-[10px] font-bold uppercase tracking-widest">Photographiez le colis ou le bordereau signé</p>
             </div>
             <input type="file" id="fileInput" accept="image/*" capture="camera" class="hidden" onchange="processImage(this.files[0])">
-            <button onclick="document.getElementById('fileInput').click()" class="w-full bg-white text-black font-black py-5 rounded-[2rem] shadow-2xl uppercase tracking-widest active:scale-95 transition-transform">Ouvrir l'appareil</button>
-            <button onclick="document.getElementById('cameraModal').classList.add('hidden')" class="text-slate-500 text-[10px] font-black uppercase tracking-widest">Annuler</button>
+            <button onclick="document.getElementById('fileInput').click()" class="w-full bg-indigo-500 text-white font-black py-6 rounded-[2.5rem] shadow-2xl shadow-indigo-500/20 uppercase tracking-[0.2em] active:scale-95 transition-transform">OUVRIR L'APPAREIL</button>
+            <button onclick="document.getElementById('cameraModal').classList.add('hidden')" class="text-slate-600 text-[10px] font-black uppercase tracking-widest">Abandonner</button>
         </div>
     </div>
 
