@@ -29,6 +29,7 @@
         let userRole = null;
         let allMissions = [];
         let currentMissionId = null;
+        let searchQuery = "";
 
         // --- AUTHENTIFICATION ---
         window.handleLogin = async (e) => {
@@ -105,15 +106,12 @@
 
         window.genererMission = async () => {
             const fields = {
-                // Expéditeur
                 exp_nom: document.getElementById('expNom').value,
                 exp_quartier: document.getElementById('expQuartier').value,
                 exp_tel: document.getElementById('expTel').value,
-                // Destinataire
                 dest_nom: document.getElementById('destNom').value,
                 dest_quartier: document.getElementById('destQuartier').value,
                 dest_tel: document.getElementById('destTel').value,
-                // Colis & Paiement
                 nature: document.getElementById('natureColis').value,
                 valeur: parseFloat(document.getElementById('valeurDeclaree').value) || 0,
                 prix: parseFloat(document.getElementById('fraisLivraison').value) || 0,
@@ -133,7 +131,6 @@
                     creator_email: currentUser.email
                 });
                 showToast("Bon de livraison créé !", "success");
-                // Reset form
                 ['expNom', 'expQuartier', 'expTel', 'destNom', 'destQuartier', 'destTel', 'valeurDeclaree', 'fraisLivraison'].forEach(id => document.getElementById(id).value = "");
                 prepareNextId();
             } catch (e) { showToast("Erreur système", "error"); }
@@ -236,6 +233,12 @@
             }
         };
 
+        // --- GESTION DE LA RECHERCHE ---
+        window.handleSearch = (val) => {
+            searchQuery = val.toLowerCase().trim();
+            renderUI();
+        };
+
         window.renderUI = () => {
             const containers = {
                 dispatch: document.getElementById('containerDispatch'),
@@ -246,8 +249,12 @@
 
             const sorted = allMissions.sort((a,b) => (b.created_at?.toMillis ? b.created_at.toMillis() : 0) - (a.created_at?.toMillis ? a.created_at.toMillis() : 0));
 
+            let countLivre = 0;
+
             sorted.forEach(m => {
                 const isMyColis = m.creator_email === currentUser.email;
+                
+                // Rendu Dispatch
                 if (m.statut === 'en_attente' && (userRole === 'admin' || userRole === 'dispatch')) {
                     containers.dispatch.innerHTML += `<div class="p-4 bg-white border border-slate-100 rounded-2xl mb-3 shadow-sm flex justify-between items-center">
                         <div class="text-[11px]"><span class="font-black text-blue-600 block">${m.id}</span><b>${m.dest_nom}</b><br><span class="text-slate-400">${m.dest_quartier}</span></div>
@@ -256,7 +263,9 @@
                             <button onclick="publierMission('${m.id}')" class="bg-blue-600 text-white text-[10px] px-5 py-2 rounded-xl font-bold">DISPATCHER</button>
                         </div>
                     </div>`;
-                } else if (m.statut === 'publie' && (userRole === 'admin' || userRole === 'livreur')) {
+                } 
+                // Rendu Livreur
+                else if (m.statut === 'publie' && (userRole === 'admin' || userRole === 'livreur')) {
                     containers.livreur.innerHTML += `<div class="p-5 bg-amber-50 border border-amber-200 rounded-3xl mb-4 space-y-3">
                         <div class="flex justify-between font-black items-center text-amber-700"><span>${m.id}</span><span class="text-[9px] bg-amber-500 text-white px-2 py-1 rounded-full uppercase">Disponible</span></div>
                         <p class="text-[11px] text-amber-900"><b>Lieu:</b> ${m.dest_quartier}<br><b>Contact:</b> ${m.dest_nom} (${m.dest_tel})</p>
@@ -267,17 +276,27 @@
                     </div>`;
                 }
                 
+                // Rendu Archives avec Recherche
                 const canSeeArchive = (userRole === 'admin' || userRole === 'dispatch' || (userRole === 'relais' && isMyColis));
                 if (canSeeArchive && m.statut === 'livre') {
-                    containers.archives.innerHTML += `<tr class="border-b border-slate-800 text-[10px] hover:bg-slate-800 transition cursor-pointer" onclick="openArchiveDetail('${m.id}')">
-                        <td class="p-4 font-bold text-white">${m.id}</td>
-                        <td class="p-4 text-slate-300"><b>${m.dest_nom}</b></td>
-                        <td class="p-4 text-center"><span class="text-emerald-400 font-black">LIVRÉ</span></td>
-                        <td class="p-4 text-right text-slate-400">${(m.prix || 0).toLocaleString()}</td>
-                    </tr>`;
+                    const matchSearch = !searchQuery || 
+                                       m.id.toLowerCase().includes(searchQuery) || 
+                                       (m.dest_nom || "").toLowerCase().includes(searchQuery) || 
+                                       (m.exp_nom || "").toLowerCase().includes(searchQuery) || 
+                                       (m.dest_quartier || "").toLowerCase().includes(searchQuery);
+                    
+                    if (matchSearch) {
+                        countLivre++;
+                        containers.archives.innerHTML += `<tr class="border-b border-slate-800 text-[10px] hover:bg-slate-800 transition cursor-pointer" onclick="openArchiveDetail('${m.id}')">
+                            <td class="p-4 font-bold text-white">${m.id}</td>
+                            <td class="p-4 text-slate-300"><b>${m.dest_nom}</b></td>
+                            <td class="p-4 text-center"><span class="text-emerald-400 font-black">LIVRÉ</span></td>
+                            <td class="p-4 text-right text-slate-400">${(m.prix || 0).toLocaleString()}</td>
+                        </tr>`;
+                    }
                 }
             });
-            document.getElementById('archiveCount').innerText = sorted.filter(m => m.statut === 'livre').length;
+            document.getElementById('archiveCount').innerText = countLivre;
         };
 
         window.openBonImpression = (id) => {
@@ -301,7 +320,6 @@
                     </div>
 
                     <div class="space-y-6">
-                        <!-- SECTION 1 -->
                         <div class="space-y-2">
                             <h3 class="bg-slate-100 p-1 text-[11px] font-black uppercase">1. INFORMATIONS EXPÉDITEUR (Client)</h3>
                             <div class="grid grid-cols-1 gap-2 text-[12px] px-2">
@@ -313,7 +331,6 @@
                             </div>
                         </div>
 
-                        <!-- SECTION 2 -->
                         <div class="space-y-2">
                             <h3 class="bg-slate-100 p-1 text-[11px] font-black uppercase">2. INFORMATIONS DESTINATAIRE (Réception)</h3>
                             <div class="grid grid-cols-1 gap-2 text-[12px] px-2">
@@ -323,7 +340,6 @@
                             </div>
                         </div>
 
-                        <!-- SECTION 3 -->
                         <div class="space-y-2">
                             <h3 class="bg-slate-100 p-1 text-[11px] font-black uppercase">3. DÉTAILS DU COLIS & PAIEMENT</h3>
                             <div class="px-2 space-y-3">
@@ -347,7 +363,6 @@
                             </div>
                         </div>
 
-                        <!-- SECTION 4 -->
                         <div class="space-y-2">
                             <h3 class="bg-slate-100 p-1 text-[11px] font-black uppercase">4. VALIDATION & SIGNATURE</h3>
                             <div class="grid grid-cols-2 gap-10 mt-4 px-2">
@@ -492,7 +507,6 @@
                     </div>
                     
                     <div class="p-6 space-y-8">
-                        <!-- EXPEDITEUR -->
                         <div class="space-y-3">
                             <p class="text-[9px] font-black text-emerald-600 uppercase border-l-4 border-emerald-600 pl-2">1. INFORMATIONS EXPÉDITEUR</p>
                             <input type="text" id="expNom" placeholder="Nom / Enseigne (Client)" class="w-full p-4 bg-slate-50 rounded-2xl font-bold text-[11px] outline-none border border-transparent focus:border-emerald-500">
@@ -502,7 +516,6 @@
                             </div>
                         </div>
 
-                        <!-- DESTINATAIRE -->
                         <div class="space-y-3">
                             <p class="text-[9px] font-black text-emerald-600 uppercase border-l-4 border-emerald-600 pl-2">2. INFORMATIONS DESTINATAIRE</p>
                             <input type="text" id="destNom" placeholder="Nom du destinataire" class="w-full p-4 bg-slate-50 rounded-2xl font-bold text-[11px] outline-none border border-transparent focus:border-emerald-500">
@@ -520,7 +533,6 @@
                             </div>
                         </div>
 
-                        <!-- DETAILS COLIS -->
                         <div class="space-y-3">
                             <p class="text-[9px] font-black text-emerald-600 uppercase border-l-4 border-emerald-600 pl-2">3. DÉTAILS DU COLIS & PAIEMENT</p>
                             <div class="grid grid-cols-2 gap-3">
@@ -561,10 +573,29 @@
                 <div id="containerLivreur"></div>
             </section>
 
-            <!-- ARCHIVES -->
+            <!-- ARCHIVES AVEC RECHERCHE -->
             <section id="rubrique4" class="role-section hidden">
                 <div class="bg-slate-900 rounded-[2.5rem] overflow-hidden shadow-2xl">
-                    <div class="p-6 flex justify-between items-center"><h2 class="text-white font-black text-xs uppercase">Historique Livraisons</h2><div id="archiveCount" class="bg-yellow-500 text-slate-900 font-black text-[9px] px-3 py-1 rounded-full">0</div></div>
+                    <div class="p-6">
+                        <div class="flex justify-between items-center mb-6">
+                            <h2 class="text-white font-black text-xs uppercase">Historique Livraisons</h2>
+                            <div id="archiveCount" class="bg-yellow-500 text-slate-900 font-black text-[9px] px-3 py-1 rounded-full">0</div>
+                        </div>
+                        
+                        <!-- BARRE DE RECHERCHE -->
+                        <div class="relative group">
+                            <div class="absolute inset-y-0 left-4 flex items-center pointer-events-none">
+                                <svg class="w-4 h-4 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
+                            </div>
+                            <input 
+                                type="text" 
+                                oninput="handleSearch(this.value)"
+                                placeholder="Rechercher une course, un nom, un quartier..." 
+                                class="w-full p-4 pl-12 bg-white/5 border border-white/10 rounded-2xl text-[11px] text-white font-bold outline-none focus:border-emerald-500/50 focus:bg-white/10 transition-all placeholder:text-slate-600"
+                            >
+                        </div>
+                    </div>
+
                     <div class="overflow-x-auto">
                         <table class="w-full text-left">
                             <thead class="bg-white/5 text-slate-500 text-[8px] uppercase font-black">
