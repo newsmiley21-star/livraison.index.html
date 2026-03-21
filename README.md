@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>CT241 - Logistique & Cloud</title>
+    <title>CT241 - Logistique & Performance</title>
     
     <!-- PWA Meta Tags -->
     <meta name="theme-color" content="#0f172a">
@@ -17,451 +17,410 @@
     
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut, signInWithCustomToken, signInAnonymously } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, collection, doc, setDoc, updateDoc, onSnapshot, query, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, doc, setDoc, updateDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-        // Configuration Firebase (Variables d'environnement)
+        // Configuration Firebase
         const firebaseConfig = JSON.parse(__firebase_config);
         const app = initializeApp(firebaseConfig);
         const auth = getAuth(app);
         const db = getFirestore(app);
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'ct241-logistique';
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'ct241-log-v3';
 
-        let currentUser = null;
-        let userRole = null;
+        // État de l'application
+        let user = null;
+        let userRole = 'admin'; 
         let allMissions = [];
         let currentMissionId = null;
-        let searchQuery = "";
 
         // --- AUTHENTIFICATION ---
         const initAuth = async () => {
             if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
                 await signInWithCustomToken(auth, __initial_auth_token);
             } else {
-                // Par défaut, on peut utiliser l'anonyme ou attendre le formulaire de login
-            }
-        };
-        initAuth();
-
-        window.handleLogin = async (e) => {
-            e.preventDefault();
-            const email = document.getElementById('loginEmail').value;
-            const pass = document.getElementById('loginPass').value;
-            const btn = document.getElementById('loginBtn');
-            const errorEl = document.getElementById('loginError');
-            btn.disabled = true;
-            btn.innerText = "Connexion...";
-            try { 
-                await signInWithEmailAndPassword(auth, email, pass); 
-            } catch (error) {
-                errorEl.innerText = "Identifiants invalides.";
-                errorEl.classList.remove('hidden');
-                btn.disabled = false;
-                btn.innerText = "ACCÉDER AU PORTAIL";
+                await signInAnonymously(auth);
             }
         };
 
-        window.handleLogout = async () => { await signOut(auth); location.reload(); };
-
-        onAuthStateChanged(auth, (user) => {
-            if (user) {
-                currentUser = user;
-                assignRole(user.email || "livreur@ct241.com"); // Fallback si anonyme pour test
-                document.getElementById('authSection').classList.add('hidden');
-                document.getElementById('appContent').classList.remove('hidden');
-                document.getElementById('userDisplayEmail').innerText = user.email || "Utilisateur";
-                startListeners();
+        onAuthStateChanged(auth, (u) => {
+            if (u) {
+                user = u;
+                document.getElementById('userStatus').innerText = "Cloud Connecté";
+                setupRealtimeSync();
                 prepareNextId();
-            } else {
-                document.getElementById('authSection').classList.remove('hidden');
             }
         });
 
-        const assignRole = (email) => {
-            const e = email.toLowerCase();
-            if (e.includes('admin')) userRole = 'admin';
-            else if (e.includes('relais') || e.includes('boutique')) userRole = 'relais';
-            else if (e.includes('dispatch')) userRole = 'dispatch';
-            else userRole = 'livreur';
-            
-            document.querySelectorAll('.role-section').forEach(s => s.classList.add('hidden'));
-            const badge = document.getElementById('badgeDisplay');
-            const colors = { admin: 'bg-red-600', dispatch: 'bg-blue-600', relais: 'bg-emerald-600', livreur: 'bg-amber-600' };
-            badge.innerHTML = `<span class="px-3 py-1 rounded-full text-[10px] font-black uppercase text-white ${colors[userRole]}">${userRole}</span>`;
+        initAuth();
 
-            if (userRole === 'admin') document.querySelectorAll('.role-section').forEach(s => s.classList.remove('hidden'));
-            else if (userRole === 'relais') { document.getElementById('rubrique1').classList.remove('hidden'); document.getElementById('rubrique4').classList.remove('hidden'); }
-            else if (userRole === 'dispatch') { document.getElementById('rubrique2').classList.remove('hidden'); document.getElementById('rubrique4').classList.remove('hidden'); }
-            else if (userRole === 'livreur') { document.getElementById('rubrique3').classList.remove('hidden'); document.getElementById('statLivreurSection').classList.remove('hidden'); }
+        // --- SYNCHRONISATION CLOUD ---
+        function setupRealtimeSync() {
+            if (!user) return;
+            const colRef = collection(db, 'artifacts', appId, 'public', 'data', 'missions');
+            
+            onSnapshot(colRef, (snapshot) => {
+                allMissions = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                renderUI();
+                renderStats();
+            }, (error) => {
+                console.error("Erreur de synchronisation:", error);
+            });
+        }
+
+        // --- LOGIQUE MÉTIER ---
+        window.changeRole = (role) => {
+            userRole = role;
+            document.querySelectorAll('.role-btn').forEach(btn => {
+                const isSelected = btn.getAttribute('onclick').includes(role);
+                btn.className = isSelected 
+                    ? "text-[9px] font-black bg-slate-900 text-white px-3 py-1.5 rounded-full role-btn transition-all shadow-lg"
+                    : "text-[9px] font-black bg-white border border-slate-200 text-slate-400 px-3 py-1.5 rounded-full role-btn hover:bg-slate-50";
+            });
+            renderUI();
         };
 
-        // --- GESTION DES MISSIONS (CLOUDSYNC) ---
         const prepareNextId = () => {
             window.nextId = "CT-" + Math.floor(Math.random() * 900000 + 100000);
             document.getElementById('displayNextId').innerText = window.nextId;
         };
 
-        const getMissionsRef = () => collection(db, 'artifacts', appId, 'public', 'data', 'missions');
+        window.creerMission = async () => {
+            const btn = document.getElementById('btnSubmit');
+            const fields = ['expNom', 'expQuartier', 'expTel', 'destNom', 'destQuartier', 'destTel', 'prix'];
+            
+            const data = {};
+            fields.forEach(id => data[id] = document.getElementById(id).value);
+            
+            if (!data.destNom || !data.prix) {
+                showToast("Veuillez remplir les informations clés", "error");
+                return;
+            }
 
-        window.genererMission = async () => {
-            if (!currentUser) return;
-            const fields = {
-                en: document.getElementById('expNom').value,
-                eq: document.getElementById('expQuartier').value,
-                et: document.getElementById('expTel').value,
-                dn: document.getElementById('destNom').value,
-                dq: document.getElementById('destQuartier').value,
-                dt: document.getElementById('destTel').value,
-                n: parseInt(document.getElementById('natureColis').value),
-                v: parseFloat(document.getElementById('valeurDeclaree').value) || 0,
-                p: parseFloat(document.getElementById('fraisLivraison').value) || 0,
-                r: parseInt(document.getElementById('modeReglement').value),
-                s: 0, // 0: Créé, 1: En cours, 2: Livré
-                ca: Date.now(),
-                ce: currentUser.email,
-                id: window.nextId
+            btn.disabled = true;
+            btn.innerText = "SAUVEGARDE CLOUD...";
+
+            const missionData = {
+                en: data.expNom, eq: data.expQuartier, et: data.expTel,
+                dn: data.destNom, dq: data.destQuartier, dt: data.destTel,
+                n: parseInt(document.getElementById('nature').value),
+                p: parseFloat(data.prix) || 0,
+                r: parseInt(document.getElementById('reglement').value),
+                status: 0,
+                createdAt: Date.now(),
+                creator: user.uid
             };
 
             try {
-                await setDoc(doc(getMissionsRef(), window.nextId), fields);
-                showToast("Bordereau enregistré dans le Cloud", "success");
-                ['expNom', 'expQuartier', 'expTel', 'destNom', 'destQuartier', 'destTel', 'valeurDeclaree', 'fraisLivraison'].forEach(id => document.getElementById(id).value = "");
+                await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'missions', window.nextId), missionData);
+                showToast("Mission enregistrée avec succès", "success");
+                fields.forEach(id => document.getElementById(id).value = "");
                 prepareNextId();
-            } catch (e) { showToast("Erreur de sauvegarde", "error"); }
+            } catch (e) {
+                showToast("Erreur de connexion Cloud", "error");
+            } finally {
+                btn.disabled = false;
+                btn.innerText = "ENREGISTRER AU CLOUD";
+            }
         };
 
-        window.publierMission = async (id) => {
-            await updateDoc(doc(getMissionsRef(), id), { s: 1 });
-            showToast("Mission assignée aux livreurs", "success");
+        window.validerDispatch = async (id) => {
+            await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'missions', id), { status: 1 });
+            showToast("Mission assignée au livreur");
         };
 
-        window.openCamera = (id) => { currentMissionId = id; document.getElementById('cameraModal').classList.remove('hidden'); };
-        
+        window.openCamera = (id) => {
+            currentMissionId = id;
+            document.getElementById('cameraModal').classList.remove('hidden');
+        };
+
         window.processImage = (file) => {
-            if(!file) return;
+            if (!file) return;
             const reader = new FileReader();
-            reader.onload = (e) => {
-                const img = new Image();
-                img.onload = () => {
-                    const canvas = document.createElement('canvas');
-                    canvas.width = 600; canvas.height = img.height * (600 / img.width);
-                    canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
-                    finalizeDelivery(canvas.toDataURL('image/jpeg', 0.6));
-                };
-                img.src = e.target.result;
+            reader.onload = async (e) => {
+                const photo = e.target.result;
+                await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'missions', currentMissionId), {
+                    status: 2,
+                    photo: photo,
+                    deliveredAt: new Date().toLocaleString(),
+                    deliveredBy: user.uid
+                });
+                document.getElementById('cameraModal').classList.add('hidden');
+                showToast("Livraison confirmée et archivée", "success");
             };
             reader.readAsDataURL(file);
         };
 
-        const finalizeDelivery = async (photo) => {
-            await updateDoc(doc(getMissionsRef(), currentMissionId), {
-                s: 2, img: photo, le: currentUser.email, lk: new Date().toISOString().split('T')[0]
-            });
-            document.getElementById('cameraModal').classList.add('hidden');
-            showToast("Livraison validée et archivée", "success");
-        };
-
-        const startListeners = () => {
-            onSnapshot(getMissionsRef(), (snap) => {
-                allMissions = snap.docs.map(doc => doc.data());
-                renderUI();
-                renderStats();
-            }, (err) => console.error("Erreur Sync:", err));
-        };
-
         // --- RENDU UI ---
-        const renderStats = () => {
-            const today = new Date().toISOString().split('T')[0];
-            const stats = { caTotal: 0, livraisonsTotal: 0, caJour: 0, livreurs: {} };
-            
-            allMissions.forEach(m => {
-                if (m.s === 2) {
-                    stats.caTotal += m.p || 0;
-                    stats.livraisonsTotal++;
-                    if (m.lk === today) stats.caJour += m.p || 0;
-                    const lEmail = m.le || 'Anonyme';
-                    if (!stats.livreurs[lEmail]) stats.livreurs[lEmail] = { count: 0, ca: 0 };
-                    stats.livreurs[lEmail].count++;
-                }
-            });
-
-            if (userRole === 'admin') {
-                document.getElementById('dashCaTotal').innerText = stats.caTotal.toLocaleString() + ' CFA';
-                document.getElementById('dashCaJour').innerText = stats.caJour.toLocaleString() + ' CFA';
-                document.getElementById('dashLivTotal').innerText = stats.livraisonsTotal;
-                const list = document.getElementById('dashLivreursList');
-                list.innerHTML = Object.entries(stats.livreurs).map(([email, data]) => `
-                    <div class="flex justify-between p-3 bg-slate-800 rounded-xl mb-2 text-[10px]">
-                        <span class="text-white truncate w-32">${email}</span>
-                        <span class="text-yellow-500 font-black">${data.count} LIVRAISONS</span>
-                    </div>`).join('');
-            }
-
-            if (userRole === 'livreur') {
-                const my = stats.livreurs[currentUser.email] || { count: 0 };
-                document.getElementById('myCount').innerText = my.count;
-                document.getElementById('progBar').style.width = Math.min((my.count / 17) * 100, 100) + '%';
-            }
-        };
-
-        window.renderUI = () => {
-            const containers = { 
-                dispatch: document.getElementById('containerDispatch'), 
-                livreur: document.getElementById('containerLivreur'), 
-                archives: document.getElementById('archiveBody') 
+        function renderUI() {
+            const containers = {
+                creer: document.getElementById('creationSection'),
+                dispatch: document.getElementById('containerDispatch'),
+                livreur: document.getElementById('containerLivreur'),
+                archives: document.getElementById('archiveSection'),
+                archiveBody: document.getElementById('archiveBody')
             };
-            Object.values(containers).forEach(c => { if(c) c.innerHTML = "" });
 
-            allMissions.sort((a,b) => (b.ca || 0) - (a.ca || 0)).forEach(m => {
-                const isMyColis = m.ce === currentUser.email;
-                
-                // Dispatch
-                if (m.s === 0 && (userRole === 'admin' || userRole === 'dispatch')) {
+            // Visibilité par rôle
+            containers.creer.classList.toggle('hidden', userRole === 'livreur' || userRole === 'dispatch');
+            containers.dispatch.parentElement.classList.toggle('hidden', userRole === 'relais' || userRole === 'livreur');
+            containers.livreur.parentElement.classList.toggle('hidden', userRole === 'relais' || userRole === 'dispatch');
+            containers.archives.classList.toggle('hidden', userRole === 'livreur');
+
+            containers.dispatch.innerHTML = "";
+            containers.livreur.innerHTML = "";
+            containers.archiveBody.innerHTML = "";
+
+            allMissions.sort((a,b) => b.createdAt - a.createdAt).forEach(m => {
+                if (m.status === 0) {
                     containers.dispatch.innerHTML += `
-                    <div class="p-4 bg-white border border-slate-100 rounded-2xl mb-3 shadow-sm flex justify-between items-center">
-                        <div class="text-[11px]"><span class="font-black text-blue-600 block">${m.id}</span><b>${m.dn}</b><br><span class="text-slate-400">${m.dq}</span></div>
-                        <div class="flex gap-2">
-                            <button onclick="openBonImpression('${m.id}')" class="bg-slate-100 text-slate-600 text-[9px] px-3 py-2 rounded-xl font-bold uppercase">Bordereau</button>
-                            <button onclick="publierMission('${m.id}')" class="bg-blue-600 text-white text-[10px] px-4 py-2 rounded-xl font-bold">DISPATCH</button>
-                        </div>
-                    </div>`;
-                } 
-                // Livreurs
-                else if (m.s === 1 && (userRole === 'admin' || userRole === 'livreur')) {
+                        <div class="p-5 bg-white border border-slate-100 rounded-[2rem] mb-4 shadow-sm flex justify-between items-center animate-in fade-in duration-500">
+                            <div class="space-y-1">
+                                <span class="text-[9px] font-black text-blue-600 uppercase tracking-tighter">${m.id}</span>
+                                <p class="text-[11px] font-black">${m.dn}</p>
+                                <p class="text-[9px] text-slate-400 font-bold uppercase">${m.dq}</p>
+                            </div>
+                            <div class="flex gap-2">
+                                <button onclick="voirBon('${m.id}')" class="bg-slate-100 text-slate-500 text-[10px] px-4 py-2.5 rounded-2xl font-black">BON</button>
+                                <button onclick="validerDispatch('${m.id}')" class="bg-blue-600 text-white text-[10px] px-5 py-2.5 rounded-2xl font-black shadow-lg shadow-blue-200">DISPATCH</button>
+                            </div>
+                        </div>`;
+                } else if (m.status === 1) {
                     containers.livreur.innerHTML += `
-                    <div class="p-5 bg-amber-50 border border-amber-200 rounded-3xl mb-4 space-y-3">
-                        <div class="flex justify-between font-black items-center text-amber-700"><span>${m.id}</span><span class="text-[9px] bg-amber-500 text-white px-2 py-1 rounded-full uppercase">À LIVRER</span></div>
-                        <p class="text-[11px]"><b>Dest :</b> ${m.dn} (${m.dt})<br><b>Lieu :</b> ${m.dq}</p>
-                        <div class="flex gap-2">
-                             <button onclick="openBonImpression('${m.id}')" class="flex-1 bg-white border border-amber-200 text-amber-700 font-black py-4 rounded-2xl text-[10px]">VOIR BON</button>
-                             <button onclick="openCamera('${m.id}')" class="flex-[2] bg-amber-500 text-white font-black py-4 rounded-2xl shadow-lg">VALIDER LIVRAISON</button>
-                        </div>
-                    </div>`;
-                }
-                
-                // Archives
-                if ((userRole === 'admin' || userRole === 'dispatch' || (userRole === 'relais' && isMyColis)) && m.s === 2) {
-                    if (!searchQuery || m.id.toLowerCase().includes(searchQuery) || (m.dn || "").toLowerCase().includes(searchQuery)) {
-                        containers.archives.innerHTML += `
-                        <tr class="border-b border-slate-800 text-[10px] hover:bg-slate-800 transition cursor-pointer" onclick="openArchiveDetail('${m.id}')">
-                            <td class="p-4 font-bold text-white">${m.id}</td>
-                            <td class="p-4 text-slate-300">${m.dn}</td>
-                            <td class="p-4 text-center"><span class="text-emerald-400 font-black">LIVRÉ</span></td>
-                            <td class="p-4 text-right text-slate-400">${(m.p || 0).toLocaleString()}</td>
+                        <div class="p-6 bg-amber-50 border border-amber-100 rounded-[2.5rem] mb-5 space-y-4 animate-in slide-in-from-right duration-300">
+                            <div class="flex justify-between items-center">
+                                <span class="text-[10px] font-black text-amber-600 italic">${m.id}</span>
+                                <span class="bg-amber-500 text-white text-[8px] font-black px-3 py-1 rounded-full uppercase">En cours</span>
+                            </div>
+                            <div class="space-y-1">
+                                <h3 class="text-sm font-black text-amber-900">${m.dn}</h3>
+                                <p class="text-xs font-bold text-amber-700/70">📍 ${m.dq} • 📞 ${m.dt}</p>
+                            </div>
+                            <div class="flex gap-2">
+                                <button onclick="voirBon('${m.id}')" class="flex-1 bg-white border border-amber-200 text-amber-700 font-black py-4 rounded-2xl text-[10px] uppercase">Détails</button>
+                                <button onclick="openCamera('${m.id}')" class="flex-[2] bg-amber-500 text-white font-black py-4 rounded-2xl shadow-xl shadow-amber-200 uppercase text-[10px] tracking-widest">Valider Livraison</button>
+                            </div>
+                        </div>`;
+                } else if (m.status === 2) {
+                    containers.archiveBody.innerHTML += `
+                        <tr class="border-b border-slate-800 text-[10px] hover:bg-slate-800 transition-colors cursor-pointer" onclick="voirBon('${m.id}')">
+                            <td class="p-5 font-black text-white italic">${m.id}</td>
+                            <td class="p-5 text-slate-400 font-bold">${m.dn}</td>
+                            <td class="p-5 text-center"><span class="bg-emerald-500/10 text-emerald-500 px-3 py-1 rounded-full text-[8px] font-black">LIVRÉ</span></td>
+                            <td class="p-5 text-right text-white font-black">${m.p.toLocaleString()} CFA</td>
                         </tr>`;
-                    }
                 }
             });
-            const c = document.getElementById('archiveCount'); if(c) c.innerText = containers.archives.children.length;
-        };
+        }
 
-        // --- MODAL DE DÉTAIL / BORDEREAU ---
-        window.openBonImpression = (id) => {
+        function renderStats() {
+            let totalCA = 0;
+            let countLiv = 0;
+            allMissions.forEach(m => {
+                if (m.status === 2) {
+                    totalCA += m.p;
+                    countLiv++;
+                }
+            });
+            document.getElementById('caTotal').innerText = totalCA.toLocaleString() + " CFA";
+            document.getElementById('countTotal').innerText = countLiv;
+        }
+
+        window.voirBon = (id) => {
             const m = allMissions.find(x => x.id === id);
-            const natureMap = ["📦 Standard", "🍟 Repas", "📁 Documents", "💊 Pharma"];
-            const regMap = ["Espèces", "Airtel Money", "Moov Money"];
-            
+            const natureMap = ["📦 Colis Standard", "🍟 Repas Chaud", "📁 Documents", "💊 Pharmacie"];
             document.getElementById('detailContent').innerHTML = `
-                <div class="print-area bg-white p-8 text-slate-900 min-h-screen font-sans">
-                    <div class="flex justify-between border-b-2 pb-6 mb-8">
-                        <div><h1 class="text-3xl font-black">CT241</h1><p class="text-[10px] font-bold text-slate-400 uppercase">Logistique & Performance</p></div>
-                        <div class="text-right"><h2 class="text-xl font-black uppercase">Bon de Livraison</h2><p class="text-xs font-bold text-slate-500">${m.id}</p></div>
-                    </div>
-                    <div class="grid grid-cols-2 gap-8 mb-10">
-                        <div class="p-4 bg-slate-50 rounded-2xl">
-                            <p class="text-[9px] font-black text-slate-400 uppercase mb-2">Expéditeur</p>
-                            <p class="font-black">${m.en}</p><p class="text-xs">${m.eq}</p><p class="text-xs font-bold">${m.et}</p>
+                <div class="p-10 text-slate-900 bg-white min-h-[500px]">
+                    <div class="flex justify-between items-start border-b-4 border-slate-900 pb-8 mb-10">
+                        <div>
+                            <h1 class="text-4xl font-black italic tracking-tighter">CT241</h1>
+                            <p class="text-[10px] font-black text-slate-400 uppercase tracking-widest">Logistique & Performance</p>
                         </div>
-                        <div class="p-4 bg-slate-900 text-white rounded-2xl">
-                            <p class="text-[9px] font-black text-white/50 uppercase mb-2">Destinataire</p>
-                            <p class="font-black">${m.dn}</p><p class="text-xs">${m.dq}</p><p class="text-xs font-bold">${m.dt}</p>
+                        <div class="text-right">
+                            <h2 class="text-xs font-black uppercase tracking-widest bg-slate-900 text-white px-4 py-2 rounded-full mb-2 inline-block">Bordereau</h2>
+                            <p class="text-xl font-black text-slate-500">${m.id}</p>
                         </div>
                     </div>
-                    <table class="w-full mb-8">
-                        <tr class="bg-slate-100 text-[10px] font-black uppercase text-slate-500 border-b">
-                            <th class="p-4 text-left">Description</th><th class="p-4">Nature</th><th class="p-4 text-right">Frais</th>
-                        </tr>
-                        <tr class="border-b">
-                            <td class="p-4 text-sm font-bold">Livraison Express CT241</td>
-                            <td class="p-4 text-center text-xs">${natureMap[m.n]}</td>
-                            <td class="p-4 text-right font-black">${m.p.toLocaleString()} CFA</td>
-                        </tr>
-                    </table>
-                    <div class="flex justify-between items-center p-6 bg-slate-50 rounded-3xl">
-                        <div class="text-xs"><b>Règlement :</b> ${regMap[m.r]}</div>
-                        <div class="text-right"><p class="text-[10px] font-bold text-slate-400 uppercase">Total à percevoir</p><p class="text-2xl font-black">${m.p.toLocaleString()} CFA</p></div>
+                    <div class="grid grid-cols-2 gap-10 mb-10">
+                        <div class="p-6 bg-slate-50 rounded-[2rem] space-y-3">
+                            <p class="text-[10px] font-black text-slate-400 uppercase tracking-widest border-b pb-2">Expéditeur</p>
+                            <p class="text-lg font-black text-slate-900">${m.en || '---'}</p>
+                            <p class="text-xs font-bold text-slate-500">${m.eq || 'N/A'}</p>
+                            <p class="text-sm font-black text-blue-600">${m.et || ''}</p>
+                        </div>
+                        <div class="p-6 bg-slate-900 text-white rounded-[2.5rem] space-y-3 shadow-2xl">
+                            <p class="text-[10px] font-black text-white/30 uppercase tracking-widest border-b border-white/10 pb-2">Destinataire</p>
+                            <p class="text-lg font-black text-white">${m.dn}</p>
+                            <p class="text-xs font-bold text-white/70">${m.dq}</p>
+                            <p class="text-sm font-black text-blue-400">${m.dt}</p>
+                        </div>
                     </div>
-                    <div class="mt-12 grid grid-cols-2 gap-12 text-center">
-                        <div class="border-t pt-4"><p class="text-[9px] font-black uppercase text-slate-300">Visa Boutique</p><div class="h-20"></div></div>
-                        <div class="border-t pt-4 font-black"><p class="text-[9px] font-black uppercase text-slate-900">Signature Client</p><div class="h-20"></div></div>
+                    <div class="p-8 bg-slate-50 rounded-[2.5rem] flex justify-between items-center mb-8 border border-slate-200">
+                        <div class="space-y-1">
+                            <p class="text-[10px] font-black text-slate-400 uppercase">Type de contenu</p>
+                            <p class="text-sm font-black text-slate-900">${natureMap[m.n]}</p>
+                        </div>
+                        <div class="text-right">
+                            <p class="text-[10px] font-black text-slate-400 uppercase">Frais de livraison</p>
+                            <p class="text-3xl font-black text-slate-900">${m.p.toLocaleString()} <small class="text-xs">CFA</small></p>
+                        </div>
                     </div>
+                    ${m.photo ? `
+                    <div class="mt-10 animate-in zoom-in duration-500">
+                        <p class="text-[10px] font-black text-slate-400 uppercase mb-4 text-center tracking-[0.2em]">Preuve de réception</p>
+                        <div class="relative group">
+                            <img src="${m.photo}" class="w-full rounded-[3rem] border-8 border-white shadow-2xl">
+                            <div class="absolute bottom-4 right-8 bg-white/80 backdrop-blur px-4 py-2 rounded-full text-[9px] font-black italic">✓ Livré le ${m.deliveredAt}</div>
+                        </div>
+                    </div>` : ''}
                 </div>`;
             document.getElementById('detailModal').classList.remove('hidden');
         };
 
-        window.openArchiveDetail = (id) => {
-            const m = allMissions.find(x => x.id === id);
-            document.getElementById('detailContent').innerHTML = `
-                <div class="p-6 space-y-4">
-                    <h2 class="text-xl font-black">Preuve de Livraison - ${m.id}</h2>
-                    ${m.img ? `<img src="${m.img}" class="w-full rounded-3xl shadow-xl">` : '<div class="p-10 bg-slate-100 rounded-3xl text-center italic">Aucune photo</div>'}
-                    <div class="p-4 bg-slate-50 rounded-2xl space-y-2 text-xs">
-                        <p><b>Livreur :</b> ${m.le}</p>
-                        <p><b>Statut :</b> Livré le ${m.lk}</p>
-                    </div>
-                </div>`;
-            document.getElementById('detailModal').classList.remove('hidden');
-        };
-
-        const showToast = (msg, type) => {
-            const t = document.getElementById('toast'); t.innerText = msg;
-            t.className = `fixed bottom-24 left-1/2 -translate-x-1/2 px-6 py-3 rounded-full text-white font-bold text-xs shadow-2xl z-[500] ${type==='success'?'bg-emerald-600':'bg-red-600'}`;
-            t.classList.remove('hidden'); setTimeout(() => t.classList.add('hidden'), 3000);
+        const showToast = (msg, type = "success") => {
+            const t = document.getElementById('toast');
+            t.innerText = msg;
+            t.className = `fixed bottom-24 left-1/2 -translate-x-1/2 px-8 py-4 rounded-full text-white font-black text-[10px] uppercase tracking-widest shadow-2xl z-[1000] animate-in slide-in-from-bottom duration-300 ${type==='success'?'bg-emerald-600':'bg-red-600'}`;
+            t.classList.remove('hidden');
+            setTimeout(() => t.classList.add('hidden'), 3000);
         };
     </script>
+
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;800&display=swap');
-        body { font-family: 'Plus Jakarta Sans', sans-serif; background-color: #f8fafc; }
+        body { font-family: 'Plus Jakarta Sans', sans-serif; background-color: #f8fafc; letter-spacing: -0.02em; }
         .hidden { display: none; }
-        @media print { 
-            body * { visibility: hidden; } 
-            .print-area, .print-area * { visibility: visible; } 
-            .print-area { position: fixed; left: 0; top: 0; width: 100%; margin: 0; } 
-        }
+        @media print { .no-print { display: none; } }
     </style>
 </head>
-<body class="min-h-screen">
+<body class="pb-32">
 
     <div id="toast" class="hidden"></div>
 
-    <!-- AUTHENTICATION -->
-    <section id="authSection" class="fixed inset-0 bg-slate-900 flex items-center justify-center p-6 z-[200]">
-        <div class="w-full max-w-sm bg-white rounded-[3rem] p-10 space-y-8 shadow-2xl text-center">
-            <img src="https://i.ibb.co/q3t8t3Rj/Gemini-Generated-Image-1pvtp31pvtp31pvt.png" class="h-20 mx-auto">
-            <h1 class="text-xl font-black">PORTAIL CT241</h1>
-            <form onsubmit="handleLogin(event)" class="space-y-4 text-left">
-                <input type="email" id="loginEmail" required class="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl font-bold text-xs" placeholder="E-mail">
-                <input type="password" id="loginPass" required class="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl font-bold text-xs" placeholder="Mot de passe">
-                <p id="loginError" class="text-[10px] text-red-500 font-bold hidden"></p>
-                <button id="loginBtn" type="submit" class="w-full bg-slate-900 text-white font-black py-4 rounded-2xl shadow-xl">CONNEXION</button>
-            </form>
+    <!-- Navigation -->
+    <nav class="bg-white/80 backdrop-blur-xl p-5 sticky top-0 z-50 border-b flex justify-between items-center no-print">
+        <div>
+            <h1 class="text-xl font-black italic tracking-tighter">CT241 <span class="text-blue-600">LOG</span></h1>
+            <span id="userStatus" class="text-[8px] font-black uppercase text-slate-400 tracking-widest">Connexion...</span>
         </div>
-    </section>
+        <div class="flex gap-1.5 p-1 bg-slate-100 rounded-full">
+            <button onclick="changeRole('admin')" class="text-[9px] font-black bg-slate-900 text-white px-3 py-1.5 rounded-full role-btn transition-all shadow-lg">ADMIN</button>
+            <button onclick="changeRole('relais')" class="text-[9px] font-black bg-white border border-slate-200 text-slate-400 px-3 py-1.5 rounded-full role-btn">RELAIS</button>
+            <button onclick="changeRole('livreur')" class="text-[9px] font-black bg-white border border-slate-200 text-slate-400 px-3 py-1.5 rounded-full role-btn">LIVREUR</button>
+        </div>
+    </nav>
 
-    <!-- APP CONTENT -->
-    <main id="appContent" class="hidden pb-24">
-        <nav class="bg-white/80 backdrop-blur-md p-4 sticky top-0 z-50 border-b flex justify-between items-center">
-            <div class="flex items-center gap-2">
-                <img src="https://i.ibb.co/q3t8t3Rj/Gemini-Generated-Image-1pvtp31pvtp31pvt.png" class="h-6">
-                <span id="userDisplayEmail" class="text-[10px] font-black truncate max-w-[100px]">...</span>
-                <div id="badgeDisplay"></div>
+    <main class="max-w-xl mx-auto p-5 space-y-8 no-print">
+        
+        <!-- Stats -->
+        <section class="grid grid-cols-2 gap-4">
+            <div class="bg-slate-900 p-8 rounded-[3rem] text-white shadow-2xl space-y-2 group overflow-hidden relative">
+                <p class="text-[9px] font-black text-slate-500 uppercase tracking-widest">Livraisons</p>
+                <h2 id="countTotal" class="text-5xl font-black tracking-tighter">0</h2>
+                <div class="absolute -right-4 -bottom-4 w-24 h-24 bg-white/5 rounded-full group-hover:scale-150 transition-transform duration-700"></div>
             </div>
-            <button onclick="handleLogout()" class="text-slate-400 p-2">S'échapper</button>
-        </nav>
+            <div class="bg-blue-600 p-8 rounded-[3rem] text-white shadow-2xl shadow-blue-200 space-y-2 relative overflow-hidden">
+                <p class="text-[9px] font-black text-blue-200 uppercase tracking-widest">C.A Global</p>
+                <h2 id="caTotal" class="text-xl font-black tracking-tighter leading-none">0 CFA</h2>
+                <div class="absolute -right-4 -bottom-4 w-24 h-24 bg-black/10 rounded-full"></div>
+            </div>
+        </section>
 
-        <div class="max-w-xl mx-auto p-4 space-y-6">
+        <!-- Création -->
+        <section id="creationSection" class="bg-white rounded-[3rem] shadow-xl p-8 space-y-6 border border-slate-100">
+            <div class="flex justify-between items-center">
+                <h2 class="font-black text-[10px] uppercase text-emerald-600 tracking-[0.2em]">Nouveau Bordereau</h2>
+                <span id="displayNextId" class="text-[10px] font-black bg-emerald-50 text-emerald-600 px-4 py-1.5 rounded-full italic tracking-widest">...</span>
+            </div>
             
-            <!-- ADMIN DASH -->
-            <section id="adminDash" class="role-section hidden space-y-4">
-                <div class="grid grid-cols-3 gap-3">
-                    <div class="bg-slate-900 p-4 rounded-3xl text-white text-center">
-                        <span class="text-[7px] font-black text-slate-500 uppercase">CA Total</span>
-                        <div id="dashCaTotal" class="text-[10px] font-black text-emerald-400">0</div>
-                    </div>
-                    <div class="bg-slate-900 p-4 rounded-3xl text-white text-center">
-                        <span class="text-[7px] font-black text-slate-500 uppercase">CA Jour</span>
-                        <div id="dashCaJour" class="text-[10px] font-black text-yellow-500">0</div>
-                    </div>
-                    <div class="bg-slate-900 p-4 rounded-3xl text-white text-center">
-                        <span class="text-[7px] font-black text-slate-500 uppercase">Livrées</span>
-                        <div id="dashLivTotal" class="text-[10px] font-black text-blue-400">0</div>
-                    </div>
+            <div class="space-y-4">
+                <div class="group">
+                    <p class="text-[8px] font-black text-slate-400 uppercase mb-2 ml-4">Informations Expéditeur</p>
+                    <input type="text" id="expNom" placeholder="Nom de la Boutique" class="w-full p-5 bg-slate-50 rounded-[2rem] font-bold text-xs border-none focus:ring-4 ring-emerald-500/20 transition-all outline-none">
                 </div>
-                <div id="dashLivreursList" class="bg-slate-900 p-4 rounded-3xl"></div>
-            </section>
-
-            <!-- STATS LIVREUR -->
-            <section id="statLivreurSection" class="role-section hidden">
-                <div class="bg-slate-900 p-6 rounded-[2.5rem] text-white space-y-4">
-                    <div class="flex justify-between items-end">
-                        <div><p class="text-[9px] font-black text-slate-400 uppercase">Courses</p><h2 id="myCount" class="text-4xl font-black">0</h2></div>
-                        <div class="w-1/2">
-                             <div class="w-full h-2 bg-slate-800 rounded-full overflow-hidden mb-2">
-                                <div id="progBar" class="h-full bg-emerald-500" style="width: 0%"></div>
-                             </div>
-                             <p class="text-[7px] text-slate-500 font-bold">Objectif Bonus : 17/jour</p>
-                        </div>
-                    </div>
+                <div class="grid grid-cols-2 gap-4">
+                    <input type="text" id="expQuartier" placeholder="Quartier Origine" class="p-5 bg-slate-50 rounded-[2rem] font-bold text-xs border-none outline-none">
+                    <input type="tel" id="expTel" placeholder="Tél. Boutique" class="p-5 bg-slate-50 rounded-[2rem] font-bold text-xs border-none outline-none">
                 </div>
-            </section>
-
-            <!-- CRÉATION BORDEREAU -->
-            <section id="rubrique1" class="role-section hidden">
-                <div class="bg-white rounded-[2.5rem] shadow-xl p-6 space-y-5 border border-slate-100">
-                    <h2 class="font-black text-xs uppercase tracking-widest text-emerald-600">Nouveau Colis : <span id="displayNextId">...</span></h2>
-                    <div class="space-y-3">
-                        <input type="text" id="expNom" placeholder="Expéditeur (Boutique)" class="w-full p-4 bg-slate-50 rounded-2xl font-bold text-xs">
-                        <div class="grid grid-cols-2 gap-3">
-                            <input type="text" id="expQuartier" placeholder="Quartier Origine" class="p-4 bg-slate-50 rounded-2xl font-bold text-xs">
-                            <input type="tel" id="expTel" placeholder="Tél Expéditeur" class="p-4 bg-slate-50 rounded-2xl font-bold text-xs">
-                        </div>
-                    </div>
-                    <div class="space-y-3">
-                        <input type="text" id="destNom" placeholder="Destinataire (Client)" class="w-full p-4 bg-slate-50 rounded-2xl font-bold text-xs">
-                        <div class="grid grid-cols-2 gap-3">
-                            <input type="text" id="destQuartier" placeholder="Destination" class="p-4 bg-slate-50 rounded-2xl font-bold text-xs">
-                            <input type="tel" id="destTel" placeholder="Tél Client" class="p-4 bg-slate-50 rounded-2xl font-bold text-xs">
-                        </div>
-                    </div>
-                    <div class="grid grid-cols-2 gap-3">
-                        <select id="natureColis" class="p-4 bg-slate-50 rounded-2xl font-bold text-xs">
-                            <option value="0">📦 Standard</option><option value="1">🍟 Repas</option><option value="2">📁 Docs</option><option value="3">💊 Pharma</option>
-                        </select>
-                        <select id="modeReglement" class="p-4 bg-slate-50 rounded-2xl font-bold text-xs">
-                            <option value="0">Espèces</option><option value="1">Airtel Money</option><option value="2">Moov Money</option>
-                        </select>
-                    </div>
-                    <div class="grid grid-cols-2 gap-3">
-                        <input type="number" id="valeurDeclaree" placeholder="Valeur Marchandise" class="p-4 bg-slate-50 rounded-2xl font-bold text-xs">
-                        <input type="number" id="fraisLivraison" placeholder="TOTAL À PERCEVOIR" class="p-4 bg-emerald-600 text-white rounded-2xl font-black text-xs">
-                    </div>
-                    <button onclick="genererMission()" class="w-full bg-slate-900 text-white font-black py-5 rounded-3xl shadow-xl uppercase text-[10px] tracking-widest">ENREGISTRER AU CLOUD</button>
+                
+                <div class="h-px bg-slate-100 my-4"></div>
+                
+                <div class="group">
+                    <p class="text-[8px] font-black text-slate-400 uppercase mb-2 ml-4">Informations Destinataire</p>
+                    <input type="text" id="destNom" placeholder="Nom Complet du Client" class="w-full p-5 bg-slate-50 rounded-[2rem] font-bold text-xs border-none focus:ring-4 ring-emerald-500/20 transition-all outline-none">
                 </div>
-            </section>
-
-            <!-- CONTAINERS DYNAMIQUES -->
-            <section id="rubrique2" class="role-section hidden"><div id="containerDispatch"></div></section>
-            <section id="rubrique3" class="role-section hidden"><div id="containerLivreur"></div></section>
-
-            <!-- ARCHIVES -->
-            <section id="rubrique4" class="role-section hidden">
-                <div class="bg-slate-900 rounded-[2.5rem] overflow-hidden">
-                    <div class="p-6 flex justify-between items-center"><h2 class="text-white font-black text-xs uppercase">Archives Cloud</h2><div id="archiveCount" class="bg-emerald-500 text-white px-3 py-1 rounded-full text-[9px] font-black">0</div></div>
-                    <div class="overflow-x-auto"><table class="w-full"><tbody id="archiveBody"></tbody></table></div>
+                <div class="grid grid-cols-2 gap-4">
+                    <input type="text" id="destQuartier" placeholder="Destination Exacte" class="p-5 bg-slate-50 rounded-[2rem] font-bold text-xs border-none outline-none">
+                    <input type="tel" id="destTel" placeholder="Contact Client" class="p-5 bg-slate-50 rounded-[2rem] font-bold text-xs border-none outline-none">
                 </div>
-            </section>
-        </div>
+
+                <div class="grid grid-cols-2 gap-4">
+                    <select id="nature" class="p-5 bg-slate-50 rounded-[2rem] font-bold text-xs border-none outline-none appearance-none">
+                        <option value="0">📦 Standard</option><option value="1">🍟 Repas</option><option value="2">📁 Documents</option><option value="3">💊 Pharma</option>
+                    </select>
+                    <select id="reglement" class="p-5 bg-slate-50 rounded-[2rem] font-bold text-xs border-none outline-none appearance-none">
+                        <option value="0">Espèces</option><option value="1">Airtel Money</option><option value="2">Moov Money</option>
+                    </select>
+                </div>
+
+                <div class="relative">
+                    <input type="number" id="prix" placeholder="MONTANT LIVRAISON" class="w-full p-6 bg-emerald-600 text-white rounded-[2rem] font-black text-lg border-none placeholder-emerald-300 outline-none">
+                    <span class="absolute right-6 top-1/2 -translate-y-1/2 text-[10px] font-black text-white/50">CFA</span>
+                </div>
+            </div>
+            
+            <button id="btnSubmit" onclick="creerMission()" class="w-full bg-slate-900 text-white font-black py-6 rounded-[2.5rem] shadow-2xl hover:bg-black transition-all uppercase text-[11px] tracking-[0.3em]">
+                Enregistrer au Cloud
+            </button>
+        </section>
+
+        <!-- Listes -->
+        <section class="space-y-4">
+            <h2 class="font-black text-[10px] uppercase text-slate-400 tracking-widest ml-4">Missions en attente</h2>
+            <div id="containerDispatch"></div>
+        </section>
+
+        <section class="space-y-4">
+            <h2 class="font-black text-[10px] uppercase text-amber-600 tracking-widest ml-4">Vos Livraisons Actives</h2>
+            <div id="containerLivreur"></div>
+        </section>
+
+        <!-- Archives -->
+        <section id="archiveSection" class="bg-slate-900 rounded-[3rem] overflow-hidden shadow-2xl">
+            <div class="p-8 border-b border-slate-800 flex justify-between items-center">
+                <h2 class="text-white font-black text-[10px] uppercase tracking-[0.2em]">Historique Cloud</h2>
+                <div class="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></div>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="w-full">
+                    <tbody id="archiveBody"></tbody>
+                </table>
+            </div>
+        </section>
+
     </main>
 
-    <!-- MODALS -->
-    <div id="detailModal" class="fixed inset-0 bg-slate-950/90 z-[400] hidden flex items-center justify-center p-4">
-        <div class="w-full max-w-2xl bg-white rounded-[2.5rem] overflow-y-auto max-h-[90vh]">
-            <div id="detailContent"></div>
-            <div class="p-6 bg-slate-50 flex gap-2 no-print">
-                <button onclick="window.print()" class="flex-1 bg-slate-900 text-white font-black py-4 rounded-2xl text-[10px]">🖨️ IMPRIMER</button>
-                <button onclick="document.getElementById('detailModal').classList.add('hidden')" class="px-6 bg-slate-200 text-slate-600 font-black py-4 rounded-2xl text-[10px]">FERMER</button>
+    <!-- Modal Détail -->
+    <div id="detailModal" class="fixed inset-0 bg-slate-950/95 z-[400] hidden flex items-center justify-center p-4 backdrop-blur-xl animate-in fade-in duration-300">
+        <div class="w-full max-w-2xl bg-white rounded-[3.5rem] overflow-hidden shadow-2xl relative">
+            <div id="detailContent" class="max-h-[80vh] overflow-y-auto"></div>
+            <div class="p-8 bg-slate-50 flex gap-4 no-print">
+                <button onclick="window.print()" class="flex-1 bg-slate-900 text-white font-black py-5 rounded-[2rem] text-xs uppercase tracking-widest shadow-xl">Imprimer le Bon</button>
+                <button onclick="document.getElementById('detailModal').classList.add('hidden')" class="px-10 bg-white border-2 border-slate-200 text-slate-500 font-black py-5 rounded-[2rem] text-xs uppercase tracking-widest">Fermer</button>
             </div>
         </div>
     </div>
 
-    <div id="cameraModal" class="fixed inset-0 bg-black z-[300] hidden flex flex-col items-center justify-center p-8 text-white">
-        <div class="text-center space-y-8 animate-in zoom-in duration-300">
-            <div class="text-6xl">📸</div>
-            <h2 class="text-2xl font-black">Preuve de Livraison</h2>
-            <p class="text-slate-500 text-xs">Prenez une photo du colis livré ou du bon signé.</p>
-            <input type="file" id="fileInput" accept="image/*" capture="camera" class="hidden" onchange="processImage(this.files[0])">
-            <button onclick="document.getElementById('fileInput').click()" class="w-full bg-white text-black font-black py-5 rounded-3xl shadow-2xl uppercase tracking-widest text-xs">OUVRIR L'APPAREIL</button>
-            <button onclick="document.getElementById('cameraModal').classList.add('hidden')" class="text-slate-500 font-bold uppercase text-[9px]">ANNULER</button>
+    <!-- Modal Photo -->
+    <div id="cameraModal" class="fixed inset-0 bg-black z-[500] hidden flex flex-col items-center justify-center p-10 text-white">
+        <div class="text-center space-y-8 max-w-xs animate-in zoom-in duration-300">
+            <div class="w-32 h-32 bg-white/10 rounded-full flex items-center justify-center text-6xl mx-auto backdrop-blur-3xl border border-white/20">📸</div>
+            <div class="space-y-2">
+                <h2 class="text-3xl font-black italic tracking-tighter">Confirmation</h2>
+                <p class="text-slate-500 text-xs font-bold leading-relaxed">Capturez une preuve claire de la réception du colis par le client.</p>
+            </div>
+            <input type="file" id="camInput" accept="image/*" capture="camera" class="hidden" onchange="processImage(this.files[0])">
+            <button onclick="document.getElementById('camInput').click()" class="w-full bg-white text-black font-black py-6 rounded-[2.5rem] shadow-2xl uppercase tracking-widest text-[11px] hover:scale-105 transition-transform">Prendre la Photo</button>
+            <button onclick="document.getElementById('cameraModal').classList.add('hidden')" class="text-slate-500 font-black uppercase text-[10px] tracking-widest pt-4">Annuler</button>
         </div>
     </div>
 
