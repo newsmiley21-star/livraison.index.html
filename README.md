@@ -34,13 +34,13 @@
         const db = getFirestore(app);
         const appId = 'ct241-service-de-livraison';
 
-        // Helper pour les chemins Firestore (Respect des règles de sécurité)
         const getMissionDoc = (id) => doc(db, 'artifacts', appId, 'public', 'data', 'missions', id);
         const getMissionsColl = () => collection(db, 'artifacts', appId, 'public', 'data', 'missions');
 
         let currentUser = null;
         let userRole = null;
         let allMissions = [];
+        let html5QrCode = null;
 
         // --- AUTHENTIFICATION ---
         window.handleLogin = async (e) => {
@@ -48,32 +48,22 @@
             const email = document.getElementById('loginEmail').value.trim().toLowerCase();
             const pass = document.getElementById('loginPass').value;
             const btn = e.target.querySelector('button');
-            
-            btn.innerText = "Connexion...";
             btn.disabled = true;
 
             try { 
                 await signInWithEmailAndPassword(auth, email, pass); 
             } catch (error) { 
-                const errEl = document.getElementById('loginError');
-                errEl.innerText = "Identifiants incorrects.";
-                errEl.classList.remove('hidden');
-                btn.innerText = "S'identifier";
+                document.getElementById('loginError').classList.remove('hidden');
                 btn.disabled = false;
             }
         };
 
-        window.handleLogout = async () => { 
-            await signOut(auth); 
-            location.reload(); 
-        };
+        window.handleLogout = async () => { await signOut(auth); location.reload(); };
 
         onAuthStateChanged(auth, (user) => {
             if (user) {
                 currentUser = user;
                 const email = user.email.toLowerCase();
-                
-                // Détermination du rôle par l'email
                 if (email.includes('admin')) userRole = 'admin';
                 else if (email.includes('relais')) userRole = 'relais';
                 else if (email.includes('dispatch')) userRole = 'dispatch';
@@ -86,18 +76,13 @@
                 setupRoleUI();
                 startListeners();
                 generateNewID();
-            } else {
-                document.getElementById('authSection').classList.remove('hidden');
-                document.getElementById('appContent').classList.add('hidden');
             }
         });
 
         const setupRoleUI = () => {
             document.querySelectorAll('.role-view').forEach(el => el.classList.add('hidden'));
-            
             if (userRole === 'admin') {
                 document.querySelectorAll('.role-view').forEach(el => el.classList.remove('hidden'));
-                document.getElementById('adminPanel').classList.remove('hidden');
             } else if (userRole === 'relais') {
                 document.getElementById('createSection').classList.remove('hidden');
                 document.getElementById('archiveSection').classList.remove('hidden');
@@ -110,22 +95,10 @@
             }
         };
 
-        // --- CRUD ACTIONS ---
-        window.deleteMission = async (id) => {
-            if (!confirm(`Supprimer définitivement la mission #${id} ?`)) return;
-            try {
-                await deleteDoc(getMissionDoc(id));
-                showToast("Mission supprimée", "success");
-            } catch (e) {
-                showToast("Erreur lors de la suppression", "error");
-                console.error(e);
-            }
-        };
-
+        // --- ACTIONS SUR LES MISSIONS ---
         window.generateNewID = () => {
             window.currentMissionId = "241-" + Math.floor(100000 + Math.random() * 900000);
-            const el = document.getElementById('nextIdDisplay');
-            if (el) el.innerText = window.currentMissionId;
+            document.getElementById('nextIdDisplay').innerText = window.currentMissionId;
         };
 
         window.saveMission = async () => {
@@ -138,35 +111,158 @@
                 dq: document.getElementById('dq').value.trim(),
                 dt: document.getElementById('dt').value.trim(),
                 p: parseFloat(document.getElementById('price').value) || 0,
-                s: 0, // Statut : 0=Attente, 1=Cours, 2=Livré
+                s: 0, 
                 ts: Date.now(),
                 date: new Date().toLocaleDateString('fr-FR'),
-                author: currentUser.email
+                author: currentUser.email,
+                history: [{status: 0, date: new Date().toLocaleString('fr-FR'), label: "Créé au relais"}]
             };
 
-            if (!data.en || !data.dn || !data.dt) return showToast("Champs obligatoires manquants", "error");
+            if (!data.dn || !data.dt) return showToast("Destinataire requis", "error");
 
             try {
-                // On utilise l'ID métier comme ID de document Firestore pour la cohérence
                 await setDoc(getMissionDoc(data.id), data);
-                showToast("Bordereau enregistré", "success");
+                showToast("Bordereau créé !", "success");
                 generateNewID();
-                // Reset partiel
                 document.getElementById('destNom').value = "";
                 document.getElementById('dt').value = "";
-            } catch (e) {
-                showToast("Erreur d'enregistrement", "error");
-            }
+            } catch (e) { showToast("Erreur lors de la création", "error"); }
         };
 
-        // --- ECOUTEURS TEMPS REEL ---
+        window.updateStatus = async (id, newStatus) => {
+            try {
+                const m = allMissions.find(x => x.id === id);
+                const history = m.history || [];
+                const labels = ["Mis en attente", "En cours de livraison", "Livré avec succès"];
+                
+                history.push({
+                    status: newStatus,
+                    date: new Date().toLocaleString('fr-FR'),
+                    label: labels[newStatus]
+                });
+
+                const updateData = { s: newStatus, history: history };
+                if (newStatus === 2) {
+                    updateData.deliveryDate = new Date().toLocaleDateString('fr-FR');
+                    updateData.deliveredBy = currentUser.email;
+                }
+                
+                await updateDoc(getMissionDoc(id), updateData);
+                showToast("Statut mis à jour", "success");
+                if(newStatus === 2) document.getElementById('detailModal').classList.add('hidden');
+            } catch (e) { showToast("Erreur de mise à jour", "error"); }
+        };
+
+        window.deleteMission = async (id) => {
+            if (!confirm(`Attention : Voulez-vous vraiment supprimer définitivement la mission #${id} ?`)) return;
+            try {
+                await deleteDoc(getMissionDoc(id));
+                showToast("Mission supprimée", "success");
+                document.getElementById('detailModal').classList.add('hidden');
+            } catch (e) { showToast("Erreur lors de la suppression", "error"); }
+        };
+
+        // --- AFFICHAGE DÉTAILLÉ & IMPRESSION ---
+        window.openDetail = (id) => {
+            const m = allMissions.find(x => x.id === id);
+            if (!m) return;
+
+            const isAdmin = userRole === 'admin';
+            
+            let historyHtml = (m.history || []).map(h => `
+                <div class="flex gap-4 items-start">
+                    <div class="w-2 h-2 rounded-full mt-1.5 ${h.status === 2 ? 'bg-emerald-500' : 'bg-blue-500'}"></div>
+                    <div>
+                        <p class="text-[10px] font-bold text-slate-800">${h.label}</p>
+                        <p class="text-[8px] text-slate-400 font-medium">${h.date}</p>
+                    </div>
+                </div>
+            `).join('');
+
+            let html = `
+                <div class="p-8 space-y-6 print-container">
+                    <div class="flex justify-between items-start">
+                        <div>
+                            <p class="text-[10px] font-black text-blue-600 uppercase">Bordereau de livraison</p>
+                            <h2 class="text-3xl font-black text-slate-900">#${m.id}</h2>
+                            <p class="text-[10px] text-slate-400 font-bold">${m.date}</p>
+                        </div>
+                        <div id="qrcode" class="bg-white p-2 rounded-xl shadow-sm border border-slate-100"></div>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-6 bg-slate-50 p-6 rounded-[2rem]">
+                        <div>
+                            <p class="text-[9px] font-black text-slate-400 uppercase mb-2">Expéditeur</p>
+                            <p class="font-bold text-sm">${m.en || 'Relais CT241'}</p>
+                            <p class="text-xs text-slate-500">${m.eq || ''}</p>
+                        </div>
+                        <div>
+                            <p class="text-[9px] font-black text-slate-400 uppercase mb-2">Destinataire</p>
+                            <p class="font-bold text-sm text-blue-600">${m.dn}</p>
+                            <p class="text-xs text-slate-500">${m.dq} • ${m.dt}</p>
+                        </div>
+                    </div>
+
+                    <div class="border-y border-dashed border-slate-200 py-6 flex justify-between items-center">
+                        <p class="text-[10px] font-black text-slate-400 uppercase">Montant à collecter</p>
+                        <p class="text-2xl font-black text-slate-900">${m.p} CFA</p>
+                    </div>
+
+                    <div class="space-y-4 no-print">
+                        <p class="text-[9px] font-black text-slate-400 uppercase">Progression de la mission</p>
+                        <div class="space-y-4 border-l-2 border-slate-100 ml-1 pl-4">
+                            ${historyHtml}
+                        </div>
+                    </div>
+
+                    <div class="no-print pt-6 space-y-3">
+                        ${m.s === 1 ? `<button onclick="updateStatus('${m.id}', 2)" class="w-full bg-emerald-500 text-white py-5 rounded-2xl font-black text-xs uppercase tracking-widest">Valider la livraison</button>` : ''}
+                        ${isAdmin ? `<button onclick="deleteMission('${m.id}')" class="w-full bg-red-50 text-red-500 py-4 rounded-2xl font-black text-[9px] uppercase tracking-widest">Supprimer l'archive</button>` : ''}
+                    </div>
+                </div>
+            `;
+
+            document.getElementById('detailContent').innerHTML = html;
+            document.getElementById('detailModal').classList.remove('hidden');
+            
+            setTimeout(() => {
+                new QRCode(document.getElementById("qrcode"), { 
+                    text: m.id, 
+                    width: 70, 
+                    height: 70,
+                    colorDark : "#0f172a",
+                    colorLight : "#ffffff",
+                    correctLevel : QRCode.CorrectLevel.H
+                });
+            }, 100);
+        };
+
+        // --- SCANNER QR ---
+        window.startScan = () => {
+            document.getElementById('qrScannerModal').classList.remove('hidden');
+            html5QrCode = new Html5Qrcode("reader");
+            html5QrCode.start(
+                { facingMode: "environment" }, 
+                { fps: 15, qrbox: { width: 250, height: 250 } },
+                (decodedText) => {
+                    html5QrCode.stop();
+                    document.getElementById('qrScannerModal').classList.add('hidden');
+                    openDetail(decodedText);
+                }
+            ).catch(err => {
+                showToast("Veuillez autoriser la caméra", "error");
+                document.getElementById('qrScannerModal').classList.add('hidden');
+            });
+        };
+
+        // --- ÉCOUTE DES DONNÉES ---
         const startListeners = () => {
             const q = query(getMissionsColl(), orderBy("ts", "desc"));
             onSnapshot(q, (snap) => {
                 allMissions = [];
                 snap.forEach(d => allMissions.push(d.data()));
                 refreshTables();
-            }, (err) => console.error("Erreur Snapshot:", err));
+            }, (error) => console.error("Erreur Firestore:", error));
         };
 
         const refreshTables = () => {
@@ -179,279 +275,190 @@
             if (arch) arch.innerHTML = "";
 
             allMissions.forEach(m => {
-                const isAdmin = userRole === 'admin';
-                
-                // 1. Dispatch (Missions en attente s=0)
-                if (m.s === 0 && (isAdmin || userRole === 'dispatch')) {
-                    if (disp) disp.innerHTML += `
-                        <div class="bg-white p-5 rounded-[2rem] shadow-sm border border-slate-100 flex justify-between items-center mb-3">
+                const isAdminOrDispatch = userRole === 'admin' || userRole === 'dispatch';
+                const isAdminOrLivreur = userRole === 'admin' || userRole === 'livreur';
+
+                if (m.s === 0 && isAdminOrDispatch) {
+                    disp.innerHTML += `
+                        <div onclick="openDetail('${m.id}')" class="bg-white p-5 rounded-[2rem] shadow-sm border border-slate-100 flex justify-between items-center mb-3 active:scale-95 transition-transform">
                             <div>
-                                <p class="text-[10px] font-black text-blue-500">#${m.id}</p>
+                                <p class="text-[9px] font-black text-blue-500">#${m.id}</p>
                                 <p class="text-sm font-bold text-slate-800">${m.dn}</p>
-                                <p class="text-[10px] text-slate-400 font-bold uppercase">${m.dq}</p>
+                                <p class="text-[9px] text-slate-400 font-bold uppercase">${m.dq}</p>
                             </div>
-                            <div class="flex gap-2">
-                                ${isAdmin ? `<button onclick="deleteMission('${m.id}')" class="w-10 h-10 flex items-center justify-center text-red-300 hover:text-red-500 hover:bg-red-50 rounded-full transition-all">✕</button>` : ''}
-                                <button onclick="updateStatus('${m.id}', 1)" class="bg-blue-600 text-white px-5 py-3 rounded-xl text-[10px] font-black uppercase tracking-wider shadow-lg shadow-blue-100">Assigner</button>
-                            </div>
+                            <button onclick="event.stopPropagation(); updateStatus('${m.id}', 1)" class="bg-blue-600 text-white px-5 py-3 rounded-xl text-[9px] font-black uppercase">Assigner</button>
                         </div>`;
-                } 
-                // 2. Livreur (Missions en cours s=1)
-                else if (m.s === 1 && (isAdmin || userRole === 'livreur')) {
-                    if (liv) liv.innerHTML += `
-                        <div class="bg-white p-6 rounded-[2.5rem] shadow-xl border-l-8 border-amber-400 mb-4 relative overflow-hidden">
-                             ${isAdmin ? `<button onclick="deleteMission('${m.id}')" class="absolute top-4 right-4 text-slate-200 hover:text-red-500 transition-colors">✕</button>` : ''}
+                } else if (m.s === 1 && isAdminOrLivreur) {
+                    liv.innerHTML += `
+                        <div onclick="openDetail('${m.id}')" class="bg-white p-6 rounded-[2.5rem] shadow-lg border-l-8 border-amber-400 mb-4 active:scale-95 transition-transform">
                             <div class="mb-4">
-                                <span class="bg-amber-50 text-amber-600 text-[9px] font-black px-3 py-1 rounded-full uppercase">En cours</span>
+                                <span class="bg-amber-50 text-amber-600 text-[8px] font-black px-2 py-1 rounded-full uppercase">En cours</span>
                                 <h4 class="font-black text-lg text-slate-900 mt-2">${m.dn}</h4>
-                                <p class="text-xs text-slate-500 font-bold uppercase tracking-tight">${m.dq} • ${m.dt}</p>
+                                <p class="text-[10px] text-slate-500 font-bold uppercase">${m.dq} • ${m.dt}</p>
                             </div>
                             <div class="flex gap-2">
-                                <a href="tel:${m.dt}" class="flex-1 bg-slate-100 text-slate-600 py-4 rounded-2xl font-black text-[10px] uppercase text-center">Appeler</a>
-                                <button onclick="updateStatus('${m.id}', 2)" 
-                                        class="flex-[2] bg-slate-900 text-white py-4 rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-emerald-600 transition-all">Terminer</button>
+                                <a href="tel:${m.dt}" class="flex-1 bg-slate-100 text-slate-600 py-3 rounded-xl font-black text-[9px] uppercase text-center">Appeler</a>
+                                <button onclick="event.stopPropagation(); updateStatus('${m.id}', 2)" class="flex-[2] bg-slate-900 text-white py-3 rounded-xl font-black text-[9px] uppercase tracking-widest">Terminer</button>
                             </div>
                         </div>`;
-                } 
-                // 3. Archives (Livrées s=2)
-                else if (m.s === 2 && (isAdmin || userRole === 'relais' || userRole === 'dispatch' || userRole === 'livreur')) {
-                    if (arch) arch.innerHTML += `
-                        <tr class="border-b border-slate-800/50 text-[11px] group">
-                            <td class="py-4 text-white/90 font-bold">#${m.id}</td>
-                            <td class="py-4 text-slate-400 font-medium">
-                                <div class="font-bold text-white/70">${m.dn}</div>
-                                <div class="text-[9px] uppercase">${m.dq}</div>
+                } else if (m.s === 2) {
+                    arch.innerHTML += `
+                        <tr onclick="openDetail('${m.id}')" class="border-b border-slate-800/50 text-[10px] active:bg-white/5 transition-colors cursor-pointer">
+                            <td class="py-4 text-white/70 font-bold">#${m.id}</td>
+                            <td class="py-4">
+                                <div class="font-bold text-white">${m.dn}</div>
+                                <div class="text-[8px] text-slate-500 uppercase">${m.dq}</div>
                             </td>
                             <td class="py-4 text-emerald-400 font-black text-right">${m.p} CFA</td>
-                            <td class="py-4 text-right">
-                                ${isAdmin ? `<button onclick="deleteMission('${m.id}')" class="text-red-500/30 hover:text-red-500 p-2 font-black transition-colors">✕</button>` : ''}
-                            </td>
                         </tr>`;
                 }
             });
         };
 
-        window.updateStatus = async (id, newStatus) => {
-            try {
-                const updateData = { s: newStatus };
-                if (newStatus === 2) {
-                    updateData.deliveryDate = new Date().toLocaleDateString('fr-FR');
-                    updateData.deliveredBy = currentUser.email;
-                }
-                await updateDoc(getMissionDoc(id), updateData);
-                showToast(newStatus === 2 ? "Livraison validée" : "Statut mis à jour", "success");
-            } catch (e) {
-                showToast("Erreur de mise à jour", "error");
-            }
-        };
-
         window.showToast = (msg, type) => {
             const t = document.getElementById('toast');
             t.innerText = msg;
-            t.className = `fixed bottom-8 left-1/2 -translate-x-1/2 px-8 py-4 rounded-full text-white font-black text-[11px] uppercase tracking-widest z-[1000] shadow-2xl transition-all duration-300 ${type==='success'?'bg-emerald-500':'bg-red-500'}`;
+            t.className = `fixed bottom-8 left-1/2 -translate-x-1/2 px-8 py-4 rounded-full text-white font-black text-[10px] uppercase tracking-widest z-[1000] shadow-2xl ${type==='success'?'bg-emerald-500':'bg-red-500'}`;
             t.classList.remove('hidden');
             setTimeout(() => t.classList.add('hidden'), 3000);
-        };
-
-        // --- FONCTIONS ADMIN ---
-        window.resetArchives = async () => {
-            const toPurge = allMissions.filter(m => m.s === 2);
-            if (toPurge.length === 0) return showToast("Aucune archive à purger", "error");
-            if (!confirm(`Voulez-vous supprimer les ${toPurge.length} missions terminées définitivement ?`)) return;
-
-            try {
-                for (let m of toPurge) {
-                    await deleteDoc(getMissionDoc(m.id));
-                }
-                showToast("Archives purgées avec succès", "success");
-            } catch (e) {
-                showToast("Erreur lors de la purge", "error");
-            }
-        };
-
-        window.exportCSV = () => {
-            const delivered = allMissions.filter(m => m.s === 2);
-            if (delivered.length === 0) return showToast("Rien à exporter", "error");
-            
-            let csv = "ID;Date;Livreur;Destinataire;Quartier;Prix\n";
-            delivered.forEach(m => {
-                csv += `${m.id};${m.deliveryDate || m.date};${m.deliveredBy || 'N/A'};${m.dn};${m.dq};${m.p}\n`;
-            });
-            
-            const blob = new Blob(["\ufeff" + csv], { type: 'text/csv;charset=utf-8;' });
-            const url = URL.createObjectURL(blob);
-            const link = document.createElement("a");
-            link.setAttribute("href", url);
-            link.setAttribute("download", `rapport_ct241_${new Date().toISOString().split('T')[0]}.csv`);
-            link.click();
         };
 
     </script>
 
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@700;800&display=swap');
-        body { font-family: 'Plus Jakarta Sans', sans-serif; background-color: #f8fafc; color: #0f172a; overflow-x: hidden; }
+        body { font-family: 'Plus Jakarta Sans', sans-serif; background-color: #f8fafc; color: #0f172a; -webkit-tap-highlight-color: transparent; }
         .hidden { display: none !important; }
-        input::placeholder { color: #cbd5e1; font-weight: 700; }
         
-        /* Custom Scrollbar */
-        ::-webkit-scrollbar { width: 0px; }
-        
-        .role-view { animation: fadeIn 0.4s ease-out; }
-        @keyframes fadeIn {
-            from { opacity: 0; transform: translateY(10px); }
-            to { opacity: 1; transform: translateY(0); }
+        @media print {
+            .no-print { display: none !important; }
+            body { background: white; }
+            .print-container { padding: 0 !important; width: 100% !important; border: none !important; box-shadow: none !important; }
+            #detailModal { position: absolute; top: 0; left: 0; width: 100%; height: auto; background: white; padding: 0; margin: 0; }
+            #detailModal > div { box-shadow: none !important; border: none !important; width: 100% !important; max-width: 100% !important; }
         }
     </style>
 </head>
-<body class="antialiased">
+<body class="antialiased select-none">
 
     <div id="toast" class="hidden"></div>
 
-    <!-- ECRAN DE CONNEXION -->
+    <!-- CONNEXION -->
     <section id="authSection" class="fixed inset-0 bg-[#0f172a] flex items-center justify-center p-6 z-[2000]">
-        <div class="bg-white w-full max-w-sm rounded-[3.5rem] p-10 shadow-2xl text-center border-t-8 border-blue-500">
-            <div class="w-20 h-20 bg-slate-50 rounded-3xl flex items-center justify-center mx-auto mb-8 shadow-inner overflow-hidden border border-slate-100">
-                <img src="https://i.ibb.co/q3t8t3Rj/Gemini-Generated-Image-1pvtp31pvtp31pvt.png" class="w-full h-full object-cover">
+        <div class="bg-white w-full max-w-sm rounded-[3.5rem] p-10 shadow-2xl text-center">
+            <div class="w-24 h-24 rounded-[2rem] bg-slate-50 mx-auto mb-8 flex items-center justify-center shadow-inner overflow-hidden border-2 border-slate-100">
+                 <img src="https://i.ibb.co/q3t8t3Rj/Gemini-Generated-Image-1pvtp31pvtp31pvt.png" class="w-full h-full object-cover scale-110">
             </div>
             <h1 class="text-3xl font-black mb-2 tracking-tighter">CT241 Log</h1>
-            <p class="text-slate-400 text-[10px] font-black uppercase tracking-[0.3em] mb-10">Access Control</p>
-            
+            <p class="text-slate-400 text-[10px] font-black uppercase tracking-[0.3em] mb-10">Interface Sécurisée</p>
             <form onsubmit="handleLogin(event)" class="space-y-4">
-                <div class="text-left">
-                    <label class="text-[9px] font-black text-slate-400 uppercase ml-4 mb-1 block">Identifiant</label>
-                    <input type="email" id="loginEmail" placeholder="votre@email.com" required class="w-full p-5 bg-slate-50 rounded-2xl font-bold outline-none border-2 border-transparent focus:border-blue-500 focus:bg-white transition-all text-sm">
-                </div>
-                <div class="text-left">
-                    <label class="text-[9px] font-black text-slate-400 uppercase ml-4 mb-1 block">Clé d'accès</label>
-                    <input type="password" id="loginPass" placeholder="••••••••" required class="w-full p-5 bg-slate-50 rounded-2xl font-bold outline-none border-2 border-transparent focus:border-blue-500 focus:bg-white transition-all text-sm">
-                </div>
-                <p id="loginError" class="text-[10px] text-red-500 font-black uppercase hidden bg-red-50 py-2 rounded-lg"></p>
-                <button type="submit" class="w-full bg-slate-900 text-white py-6 rounded-2xl font-black uppercase text-[11px] tracking-widest shadow-xl shadow-slate-200 hover:bg-blue-600 transition-all active:scale-95">S'identifier</button>
+                <input type="email" id="loginEmail" placeholder="votre@email.com" required class="w-full p-5 bg-slate-50 rounded-2xl font-bold outline-none text-sm border-2 border-transparent focus:border-blue-100 transition-all">
+                <input type="password" id="loginPass" placeholder="••••••••" required class="w-full p-5 bg-slate-50 rounded-2xl font-bold outline-none text-sm border-2 border-transparent focus:border-blue-100 transition-all">
+                <p id="loginError" class="text-[9px] text-red-500 font-black uppercase hidden">Identifiants incorrects</p>
+                <button type="submit" class="w-full bg-slate-900 text-white py-6 rounded-2xl font-black uppercase text-[11px] tracking-widest active:scale-95 transition-all shadow-xl">Se connecter</button>
             </form>
         </div>
     </section>
 
-    <!-- INTERFACE PRINCIPALE -->
-    <main id="appContent" class="hidden min-h-screen pb-20">
-        <!-- HEADER -->
-        <nav class="bg-white/90 backdrop-blur-xl p-5 border-b sticky top-0 z-50 flex justify-between items-center shadow-sm">
+    <!-- APPLICATION -->
+    <main id="appContent" class="hidden min-h-screen pb-24">
+        <nav class="bg-white/80 backdrop-blur-2xl p-5 border-b sticky top-0 z-50 flex justify-between items-center no-print">
             <div class="flex items-center gap-4">
-                <div class="bg-slate-900 w-10 h-10 rounded-xl flex items-center justify-center overflow-hidden">
-                    <img src="https://i.ibb.co/q3t8t3Rj/Gemini-Generated-Image-1pvtp31pvtp31pvt.png" class="w-8 h-8 rounded-lg object-cover">
+                <div class="w-10 h-10 rounded-xl overflow-hidden border border-slate-100">
+                    <img src="https://i.ibb.co/q3t8t3Rj/Gemini-Generated-Image-1pvtp31pvtp31pvt.png" class="w-full h-full object-cover">
                 </div>
                 <div>
-                    <p id="userMail" class="text-[9px] font-black text-slate-400 uppercase tracking-widest">Utilisateur</p>
-                    <div class="flex items-center gap-2">
-                        <span class="w-1.5 h-1.5 bg-emerald-500 rounded-full"></span>
-                        <p class="text-[11px] font-black text-slate-900 uppercase">Connecté</p>
-                    </div>
+                    <p id="userMail" class="text-[8px] font-black text-slate-400 uppercase tracking-widest">Utilisateur</p>
+                    <p class="text-[10px] font-black text-slate-900 uppercase">Panel Logistique</p>
                 </div>
             </div>
-            <button onclick="handleLogout()" class="bg-red-50 text-red-500 px-4 py-2.5 rounded-xl font-black text-[10px] uppercase tracking-wider border border-red-100">Déconnexion</button>
+            <div class="flex gap-2">
+                <button onclick="startScan()" class="bg-slate-100 w-11 h-11 rounded-xl flex items-center justify-center hover:bg-slate-200 transition-colors">📸</button>
+                <button onclick="handleLogout()" class="bg-red-50 text-red-500 px-4 h-11 rounded-xl font-black text-[9px] uppercase tracking-wider">OFF</button>
+            </div>
         </nav>
 
         <div class="max-w-md mx-auto p-6 space-y-10">
-
-            <!-- ADMIN PANEL -->
-            <section id="adminPanel" class="hidden bg-slate-900 p-8 rounded-[3rem] shadow-2xl space-y-6 border-b-4 border-blue-500">
-                <div class="flex items-center justify-between">
-                    <p class="text-white/40 text-[10px] font-black uppercase tracking-[0.3em]">Outils Administration</p>
-                    <span class="px-3 py-1 bg-blue-500/20 text-blue-400 rounded-full text-[9px] font-black uppercase">Root Mode</span>
-                </div>
-                <div class="grid grid-cols-2 gap-4">
-                    <button onclick="exportCSV()" class="bg-blue-600 text-white p-5 rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg shadow-blue-900/50">Exporter CSV</button>
-                    <button onclick="resetArchives()" class="bg-white/5 text-red-400 border border-white/10 p-5 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-red-500/10 transition-colors">Purger Tout</button>
-                </div>
-            </section>
             
-            <!-- CRÉATION (Relais/Admin) -->
-            <section id="createSection" class="role-view hidden bg-white p-10 rounded-[3.5rem] shadow-xl border border-slate-100">
+            <!-- SECTION CRÉATION (Visible Relais/Admin) -->
+            <section id="createSection" class="role-view hidden bg-white p-10 rounded-[3.5rem] shadow-xl border border-slate-100 no-print">
                 <div class="flex justify-between items-center mb-8">
-                    <div>
-                        <h2 class="font-black text-2xl tracking-tighter">Nouveau Colis</h2>
-                        <p class="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Enregistrement</p>
-                    </div>
-                    <div class="text-right">
-                        <span id="nextIdDisplay" class="bg-blue-50 text-blue-600 px-4 py-2 rounded-xl font-black text-xs">...</span>
-                    </div>
+                    <h2 class="font-black text-xl tracking-tighter">Nouveau Colis</h2>
+                    <span id="nextIdDisplay" class="bg-blue-50 text-blue-600 px-4 py-2 rounded-xl font-black text-[10px] border border-blue-100">Génération...</span>
                 </div>
-                
-                <div class="space-y-6">
-                    <div class="space-y-3">
-                        <label class="text-[10px] font-black text-slate-500 uppercase ml-4">Informations Expéditeur</label>
-                        <input type="text" id="expNom" placeholder="Nom de l'Expéditeur / Boutique" class="w-full p-5 bg-slate-50 rounded-2xl text-sm font-bold border-2 border-transparent focus:border-blue-100 outline-none transition-all">
-                        <div class="grid grid-cols-2 gap-3">
-                            <input type="text" id="expQuartier" placeholder="Quartier" class="p-5 bg-slate-50 rounded-2xl text-sm font-bold border-2 border-transparent focus:border-blue-100 outline-none transition-all">
-                            <input type="tel" id="expTel" placeholder="Contact" class="p-5 bg-slate-50 rounded-2xl text-sm font-bold border-2 border-transparent focus:border-blue-100 outline-none transition-all">
-                        </div>
+                <div class="space-y-5">
+                    <input type="text" id="expNom" placeholder="Nom Boutique / Expéditeur" class="w-full p-5 bg-slate-50 rounded-2xl text-sm font-bold border-2 border-transparent focus:border-blue-100 outline-none transition-all">
+                    <div class="grid grid-cols-2 gap-3">
+                        <input type="text" id="expQuartier" placeholder="Ville/Quartier" class="p-5 bg-slate-50 rounded-2xl text-sm font-bold outline-none border-2 border-transparent focus:border-blue-100">
+                        <input type="tel" id="expTel" placeholder="Contact" class="p-5 bg-slate-50 rounded-2xl text-sm font-bold outline-none border-2 border-transparent focus:border-blue-100">
                     </div>
-                    
-                    <div class="h-px bg-slate-100 mx-4"></div>
-
-                    <div class="space-y-3">
-                        <label class="text-[10px] font-black text-slate-500 uppercase ml-4">Informations Destinataire</label>
-                        <input type="text" id="destNom" placeholder="Nom complet du destinataire" class="w-full p-5 bg-slate-50 rounded-2xl text-sm font-bold border-2 border-transparent focus:border-blue-100 outline-none transition-all">
-                        <div class="grid grid-cols-2 gap-3">
-                            <input type="text" id="dq" placeholder="Quartier" class="p-5 bg-slate-50 rounded-2xl text-sm font-bold border-2 border-transparent focus:border-blue-100 outline-none transition-all">
-                            <input type="tel" id="dt" placeholder="Numéro Tél" class="p-5 bg-slate-50 rounded-2xl text-sm font-bold border-2 border-transparent focus:border-blue-100 outline-none transition-all">
-                        </div>
+                    <div class="h-px bg-slate-100 my-2"></div>
+                    <input type="text" id="destNom" placeholder="Destinataire (Nom complet)" class="w-full p-5 bg-slate-50 rounded-2xl text-sm font-bold border-2 border-transparent focus:border-blue-100 outline-none transition-all">
+                    <div class="grid grid-cols-2 gap-3">
+                        <input type="text" id="dq" placeholder="Quartier Dest." class="p-5 bg-slate-50 rounded-2xl text-sm font-bold outline-none border-2 border-transparent focus:border-blue-100">
+                        <input type="tel" id="dt" placeholder="Téléphone Dest." class="p-5 bg-slate-50 rounded-2xl text-sm font-bold outline-none border-2 border-transparent focus:border-blue-100">
                     </div>
-
                     <div class="pt-4">
-                        <label class="text-[10px] font-black text-blue-500 uppercase ml-4 mb-2 block">Montant Livraison</label>
-                        <input type="number" id="price" placeholder="Prix (CFA)" class="w-full p-6 bg-blue-50 text-blue-700 rounded-[2rem] text-center text-2xl font-black outline-none border-2 border-blue-100 focus:bg-white transition-all shadow-inner">
+                        <p class="text-[9px] font-black text-slate-400 uppercase mb-2 ml-1">Frais de livraison (CFA)</p>
+                        <input type="number" id="price" placeholder="0" class="w-full p-6 bg-blue-50 text-blue-700 rounded-[2rem] text-center text-2xl font-black outline-none border-2 border-blue-100">
                     </div>
-                    
-                    <button onclick="saveMission()" class="w-full bg-slate-900 text-white py-6 rounded-[2rem] font-black text-[11px] uppercase tracking-[0.2em] shadow-xl shadow-slate-200 hover:bg-blue-600 transition-all active:scale-95">Valider le Bordereau</button>
+                    <button onclick="saveMission()" class="w-full bg-slate-900 text-white py-6 rounded-[2rem] font-black text-[10px] uppercase tracking-widest shadow-xl active:scale-95 transition-all">Valider l'enregistrement</button>
                 </div>
             </section>
 
-            <!-- DISPATCH SECTION -->
-            <section id="dispatchSection" class="role-view hidden">
-                <div class="flex items-center justify-between mb-6 ml-2">
-                    <div class="flex items-center gap-3">
-                        <span class="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></span>
-                        <h3 class="text-[10px] font-black text-slate-400 uppercase tracking-widest">Attente Dispatching</h3>
-                    </div>
-                </div>
-                <div id="dispatchList" class="space-y-3">
-                    <div class="p-10 text-center text-slate-300 font-bold text-xs">Chargement des flux...</div>
-                </div>
+            <!-- SECTION DISPATCH (Visible Dispatch/Admin) -->
+            <section id="dispatchSection" class="role-view hidden no-print">
+                <h3 class="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-6 ml-2 flex items-center gap-2">
+                    <span class="w-1.5 h-1.5 rounded-full bg-blue-500"></span>
+                    Missions à assigner
+                </h3>
+                <div id="dispatchList" class="space-y-3"></div>
             </section>
 
-            <!-- LIVREUR SECTION -->
-            <section id="livreurSection" class="role-view hidden">
-                <div class="flex items-center gap-3 mb-6 ml-2">
-                    <span class="w-2 h-2 bg-amber-400 rounded-full animate-pulse"></span>
-                    <h3 class="text-[10px] font-black text-slate-400 uppercase tracking-widest">Courses en cours</h3>
-                </div>
-                <div id="livreurList" class="space-y-4">
-                    <div class="p-10 text-center text-slate-300 font-bold text-xs">Aucune course active.</div>
-                </div>
+            <!-- SECTION LIVREUR (Visible Livreur/Admin) -->
+            <section id="livreurSection" class="role-view hidden no-print">
+                <h3 class="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-6 ml-2 flex items-center gap-2">
+                    <span class="w-1.5 h-1.5 rounded-full bg-amber-500"></span>
+                    Livraisons en cours
+                </h3>
+                <div id="livreurList" class="space-y-4"></div>
             </section>
 
-            <!-- ARCHIVES (History) -->
-            <section id="archiveSection" class="role-view hidden bg-[#0f172a] rounded-[3.5rem] p-8 shadow-2xl border-b-4 border-emerald-500">
-                <div class="flex justify-between items-center mb-8">
-                    <h3 class="text-white/40 text-[10px] font-black uppercase tracking-widest">Rapport d'activité</h3>
-                    <span class="bg-emerald-500/20 text-emerald-400 px-3 py-1 rounded-full text-[9px] font-black uppercase">Terminé</span>
+            <!-- SECTION ARCHIVES (Visible par tous) -->
+            <section id="archiveSection" class="role-view hidden bg-[#0f172a] rounded-[3.5rem] p-10 shadow-2xl no-print">
+                <div class="flex justify-between items-center mb-10">
+                    <h3 class="text-white text-[11px] font-black uppercase tracking-widest">Archives & Recettes</h3>
+                    <div class="w-8 h-8 bg-white/5 rounded-full flex items-center justify-center text-xs">📦</div>
                 </div>
-                <div class="overflow-hidden">
+                <div class="overflow-x-auto">
                     <table class="w-full">
-                        <tbody id="archiveList">
-                            <tr><td class="py-10 text-center text-slate-600 text-xs font-bold">Initialisation de l'historique...</td></tr>
-                        </tbody>
+                        <tbody id="archiveList"></tbody>
                     </table>
                 </div>
             </section>
-
         </div>
     </main>
 
-    <footer class="fixed bottom-0 left-0 right-0 p-4 pointer-events-none">
-        <p class="text-center text-[8px] font-black text-slate-300 uppercase tracking-[0.5em] mb-2">CT241 Logistics OS v2.0</p>
-    </footer>
+    <!-- MODAL DÉTAIL & IMPRESSION -->
+    <div id="detailModal" class="fixed inset-0 bg-slate-950/90 z-[500] hidden flex items-center justify-center p-4 backdrop-blur-sm">
+        <div class="w-full max-w-md bg-white rounded-[3.5rem] overflow-hidden shadow-2xl transition-all scale-100">
+            <div id="detailContent" class="max-h-[80vh] overflow-y-auto">
+                <!-- Rempli par JS -->
+            </div>
+            <div class="p-8 bg-slate-50 flex gap-4 no-print border-t border-slate-100">
+                <button onclick="window.print()" class="flex-[2] bg-slate-900 text-white font-black py-5 rounded-2xl text-[10px] uppercase tracking-widest shadow-lg hover:bg-black transition-colors">🖨️ Imprimer</button>
+                <button onclick="document.getElementById('detailModal').classList.add('hidden')" class="flex-1 bg-white border border-slate-200 text-slate-500 font-black py-5 rounded-2xl text-[10px] uppercase tracking-widest">Fermer</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL SCANNER QR -->
+    <div id="qrScannerModal" class="fixed inset-0 bg-black/95 z-[900] hidden flex flex-col items-center justify-center p-8">
+        <div class="w-full max-w-sm space-y-8">
+            <div id="reader" class="rounded-[3rem] overflow-hidden bg-slate-800 border-4 border-white/5 shadow-2xl"></div>
+            <button onclick="document.getElementById('qrScannerModal').classList.add('hidden'); if(html5QrCode) html5QrCode.stop();" class="w-full bg-red-600 text-white py-6 rounded-[2rem] font-black text-xs uppercase tracking-widest">Annuler le scan</button>
+        </div>
+    </div>
 
 </body>
 </html>
