@@ -5,7 +5,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>CT241 - Logistique & Performance</title>
     
-    <!-- PWA Meta Tags -->
     <meta name="theme-color" content="#0f172a">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -106,13 +105,36 @@
             return true;
         };
 
-        // --- GESTION ADMIN ---
+        // --- GESTION ADMIN (CORRECTIONS ICI) ---
         window.deleteMission = async (id) => {
             if (!confirm("Supprimer définitivement cette mission ?")) return;
             try {
-                await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'missions', id));
-                showToast("Mission supprimée", "success");
-            } catch (e) { showToast("Erreur suppression", "error"); }
+                // S'assurer que le chemin vers le document est correct
+                const missionRef = doc(db, 'artifacts', appId, 'public', 'data', 'missions', id);
+                await deleteDoc(missionRef);
+                showToast("Mission supprimée avec succès", "success");
+            } catch (e) { 
+                console.error("Erreur Firestore lors de la suppression:", e);
+                showToast("Erreur lors de la suppression. Vérifiez vos droits.", "error"); 
+            }
+        };
+
+        window.resetAccounting = async () => {
+            const delivered = allMissions.filter(m => m.s === 2);
+            if (delivered.length === 0) return showToast("Rien à supprimer", "error");
+
+            if (!confirm(`ATTENTION : ${delivered.length} missions seront supprimées. Continuer ?`)) return;
+
+            try {
+                // On utilise une boucle asynchrone propre
+                for (const m of delivered) {
+                    await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'missions', m.id));
+                }
+                showToast("Comptabilité remise à zéro", "success");
+            } catch (e) {
+                console.error("Erreur Reset:", e);
+                showToast("Échec partiel ou total du reset", "error");
+            }
         };
 
         window.downloadReport = () => {
@@ -135,35 +157,23 @@
             showToast("Rapport téléchargé", "success");
         };
 
-        window.resetAccounting = async () => {
-            if (!confirm("ATTENTION : Cela supprimera TOUTES les missions archivées définitivement. Avez-vous téléchargé le rapport ?")) return;
-            const delivered = allMissions.filter(m => m.s === 2);
-            for (const m of delivered) {
-                await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'missions', m.id));
-            }
-            showToast("Comptabilité remise à zéro", "success");
-        };
-
-        // --- GPS & MAPS ---
-        window.openGoogleMaps = (destination) => {
-            const encodedAddr = encodeURIComponent(destination + ", Libreville");
-            const url = `https://www.google.com/maps/dir/?api=1&destination=${encodedAddr}&travelmode=driving`;
-            window.open(url, '_blank');
-        };
-
         // --- GESTION DES DONNÉES ---
         const startListeners = () => {
+            // Listener temps réel sur la collection des missions
             onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'missions'), (snap) => {
                 allMissions = [];
                 snap.forEach(doc => allMissions.push(doc.data()));
                 renderUI();
                 renderStats();
+            }, (error) => {
+                console.error("Erreur Listener:", error);
             });
         };
 
         const prepareNextId = () => {
             window.nextId = "2026-" + Math.floor(Math.random() * 900000 + 100000);
-            document.getElementById('displayNextId').innerText = window.nextId;
+            const el = document.getElementById('displayNextId');
+            if(el) el.innerText = window.nextId;
         };
 
         window.genererMission = async () => {
@@ -185,12 +195,19 @@
                 });
                 showToast("Mission enregistrée", "success");
                 prepareNextId();
+                // Reset formulaire
+                document.getElementById('destNom').value = "";
+                document.getElementById('dq').value = "";
+                document.getElementById('dt').value = "";
+                document.getElementById('fraisLivraison').value = "";
             } catch (e) { showToast("Erreur Firestore", "error"); }
         };
 
         window.publierMission = async (id) => {
-            await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'missions', id), { s: 1 });
-            showToast("Mission envoyée aux livreurs", "success");
+            try {
+                await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'missions', id), { s: 1 });
+                showToast("Mission envoyée aux livreurs", "success");
+            } catch (e) { showToast("Erreur de mise à jour", "error"); }
         };
 
         // --- PHOTO & VALIDATION ---
@@ -204,14 +221,16 @@
             const reader = new FileReader();
             reader.onload = async (e) => {
                 const base64 = e.target.result;
-                await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'missions', currentMissionForPhoto), {
-                    s: 2, 
-                    le: currentUser.email, 
-                    lk: new Date().toISOString().split('T')[0],
-                    proof: base64
-                });
-                document.getElementById('cameraModal').classList.add('hidden');
-                showToast("Livraison validée avec photo", "success");
+                try {
+                    await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'missions', currentMissionForPhoto), {
+                        s: 2, 
+                        le: currentUser.email, 
+                        lk: new Date().toISOString().split('T')[0],
+                        proof: base64
+                    });
+                    document.getElementById('cameraModal').classList.add('hidden');
+                    showToast("Livraison validée avec photo", "success");
+                } catch (err) { showToast("Erreur lors de la validation", "error"); }
             };
             reader.readAsDataURL(file);
         };
@@ -229,12 +248,22 @@
         const validateMission = async (id) => {
             const m = allMissions.find(x => x.id === id);
             if(m && m.s === 1) {
-                if(html5QrCode) html5QrCode.stop();
+                if(html5QrCode) {
+                    await html5QrCode.stop();
+                    html5QrCode = null;
+                }
                 document.getElementById('qrScannerModal').classList.add('hidden');
                 triggerPhoto(id);
             } else {
                 showToast("Bordereau invalide", "error");
             }
+        };
+
+        // --- GPS ---
+        window.openGoogleMaps = (destination) => {
+            const encodedAddr = encodeURIComponent(destination + ", Libreville");
+            const url = `https://www.google.com/maps/dir/?api=1&destination=${encodedAddr}&travelmode=driving`;
+            window.open(url, '_blank');
         };
 
         // --- RENDU UI ---
@@ -252,7 +281,7 @@
 
                 // Vue Dispatch / En attente
                 if (m.s === 0 && (isAdmin || userRole === 'dispatch')) {
-                    contDisp.innerHTML += `
+                    if(contDisp) contDisp.innerHTML += `
                         <div class="p-5 bg-white border border-slate-100 rounded-3xl mb-4 flex justify-between items-center shadow-sm">
                             <div class="flex items-center gap-3">
                                 ${isAdmin ? `<button onclick="deleteMission('${m.id}')" class="p-2 text-red-400 hover:text-red-600 transition-colors"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg></button>` : ''}
@@ -262,14 +291,14 @@
                                 </div>
                             </div>
                             <div class="flex gap-2">
-                                <button onclick="openBonImpression('${m.id}')" class="bg-slate-50 p-3 rounded-2xl text-slate-400 hover:text-blue-600 transition-all"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"></path></svg></button>
+                                <button onclick="openBonImpression('${m.id}')" class="bg-slate-50 p-3 rounded-2xl text-slate-400 hover:text-blue-600 transition-all"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 00-2 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"></path></svg></button>
                                 <button onclick="publierMission('${m.id}')" class="bg-blue-600 text-white px-5 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest">Assigner</button>
                             </div>
                         </div>`;
                 } 
                 // Vue Livreur / En cours
                 else if (m.s === 1 && (isAdmin || userRole === 'livreur')) {
-                    contLiv.innerHTML += `
+                    if(contLiv) contLiv.innerHTML += `
                         <div class="p-6 bg-white border-l-8 border-amber-400 rounded-[2rem] mb-5 shadow-lg relative">
                             ${isAdmin ? `<button onclick="deleteMission('${m.id}')" class="absolute top-4 right-4 p-2 text-slate-300 hover:text-red-500"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg></button>` : ''}
                             <div class="flex justify-between items-start mb-4">
@@ -291,7 +320,7 @@
                 } 
                 // Archives / Livré
                 else if (m.s === 2 && (isAdmin || userRole === 'dispatch' || userRole === 'relais')) {
-                    contArch.innerHTML += `
+                    if(contArch) contArch.innerHTML += `
                         <tr class="border-b border-slate-800 text-[10px]">
                             <td class="p-4 font-bold text-white">${m.id}</td>
                             <td class="p-4 text-slate-300">
@@ -309,6 +338,7 @@
 
         window.openBonImpression = (id) => {
             const m = allMissions.find(x => x.id === id);
+            if(!m) return;
             document.getElementById('detailContent').innerHTML = `
                 <div class="print-area p-10 bg-white text-slate-900">
                     <div class="flex justify-between items-center border-b-4 border-slate-900 pb-6 mb-8">
@@ -329,10 +359,14 @@
                     </div>
                 </div>`;
             document.getElementById('detailModal').classList.remove('hidden');
-            setTimeout(() => new QRCode(document.getElementById("qrcode"), { text: "CT241-"+m.id, width: 160, height: 160 }), 100);
+            setTimeout(() => {
+                const qrContainer = document.getElementById("qrcode");
+                if(qrContainer) new QRCode(qrContainer, { text: "CT241-"+m.id, width: 160, height: 160 });
+            }, 100);
         };
 
         const renderStats = () => {
+            if(!currentUser) return;
             let count = 0, bonus = 0;
             allMissions.forEach(m => { if(m.s === 2 && m.le === currentUser.email) { count++; if(count > 17) bonus += 700; } });
             if(document.getElementById('myCount')) document.getElementById('myCount').innerText = count;
