@@ -20,7 +20,7 @@
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-app.js";
         import { getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-auth.js";
-        import { getFirestore, collection, doc, setDoc, updateDoc, onSnapshot, query, where } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-firestore.js";
+        import { getFirestore, collection, doc, setDoc, updateDoc, deleteDoc, onSnapshot, query, where, getDocs } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-firestore.js";
 
         const firebaseConfig = {
             apiKey: "AIzaSyAdNSFmL45rSo9SxJJkvUPWeext0f7RX_Q",
@@ -96,11 +96,52 @@
             const colors = { admin: 'bg-red-600', dispatch: 'bg-blue-600', relais: 'bg-emerald-600', livreur: 'bg-amber-600' };
             document.getElementById('badgeDisplay').innerHTML = `<span class="px-3 py-1 rounded-full text-[10px] font-black uppercase text-white ${colors[userRole]}">${userRole}</span>`;
 
-            if (userRole === 'admin') document.querySelectorAll('.role-section').forEach(s => s.classList.remove('hidden'));
+            if (userRole === 'admin') {
+                document.querySelectorAll('.role-section').forEach(s => s.classList.remove('hidden'));
+                document.getElementById('adminControls').classList.remove('hidden');
+            }
             else if (userRole === 'relais') { document.getElementById('rubrique1').classList.remove('hidden'); document.getElementById('rubrique4').classList.remove('hidden'); }
             else if (userRole === 'dispatch') { document.getElementById('rubrique2').classList.remove('hidden'); document.getElementById('rubrique4').classList.remove('hidden'); }
             else if (userRole === 'livreur') { document.getElementById('rubrique3').classList.remove('hidden'); document.getElementById('statLivreurSection').classList.remove('hidden'); }
             return true;
+        };
+
+        // --- GESTION ADMIN ---
+        window.deleteMission = async (id) => {
+            if (!confirm("Supprimer définitivement cette mission ?")) return;
+            try {
+                await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'missions', id));
+                showToast("Mission supprimée", "success");
+            } catch (e) { showToast("Erreur suppression", "error"); }
+        };
+
+        window.downloadReport = () => {
+            const now = new Date().toLocaleDateString('fr-FR').replace(/\//g, '-');
+            const delivered = allMissions.filter(m => m.s === 2);
+            if (delivered.length === 0) return showToast("Aucune donnée à exporter", "error");
+
+            let csv = "ID;Date;Expediteur;Destinataire;Quartier;Livreur;Montant\n";
+            delivered.forEach(m => {
+                csv += `${m.id};${m.lk || m.cad};${m.en};${m.dn};${m.dq};${m.le ? m.le.split('@')[0] : 'N/A'};${m.p}\n`;
+            });
+
+            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+            const link = document.createElement("a");
+            link.href = URL.createObjectURL(blob);
+            link.setAttribute("download", `Rapport_CT241_${now}.csv`);
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            showToast("Rapport téléchargé", "success");
+        };
+
+        window.resetAccounting = async () => {
+            if (!confirm("ATTENTION : Cela supprimera TOUTES les missions archivées définitivement. Avez-vous téléchargé le rapport ?")) return;
+            const delivered = allMissions.filter(m => m.s === 2);
+            for (const m of delivered) {
+                await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'missions', m.id));
+            }
+            showToast("Comptabilité remise à zéro", "success");
         };
 
         // --- GPS & MAPS ---
@@ -133,7 +174,6 @@
                 dn: document.getElementById('destNom').value,
                 dq: document.getElementById('dq').value,
                 dt: document.getElementById('dt').value,
-                n: 1, // Nature standard
                 p: parseFloat(document.getElementById('fraisLivraison').value) || 0,
             };
             if (!fields.en || !fields.dt || !fields.p) return showToast("Informations manquantes", "error");
@@ -191,7 +231,6 @@
             if(m && m.s === 1) {
                 if(html5QrCode) html5QrCode.stop();
                 document.getElementById('qrScannerModal').classList.add('hidden');
-                // On demande la photo après le scan réussi
                 triggerPhoto(id);
             } else {
                 showToast("Bordereau invalide", "error");
@@ -209,22 +248,30 @@
             if(contArch) contArch.innerHTML = "";
 
             allMissions.sort((a,b) => b.ca - a.ca).forEach(m => {
-                if (m.s === 0 && (userRole === 'admin' || userRole === 'dispatch')) {
+                const isAdmin = userRole === 'admin';
+
+                // Vue Dispatch / En attente
+                if (m.s === 0 && (isAdmin || userRole === 'dispatch')) {
                     contDisp.innerHTML += `
                         <div class="p-5 bg-white border border-slate-100 rounded-3xl mb-4 flex justify-between items-center shadow-sm">
-                            <div>
-                                <p class="text-[9px] font-black text-blue-600 mb-1">#${m.id}</p>
-                                <p class="text-[11px] font-black text-slate-900">${m.dn}</p>
-                                <p class="text-[10px] text-slate-400 font-bold">${m.dq}</p>
+                            <div class="flex items-center gap-3">
+                                ${isAdmin ? `<button onclick="deleteMission('${m.id}')" class="p-2 text-red-400 hover:text-red-600 transition-colors"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg></button>` : ''}
+                                <div>
+                                    <p class="text-[9px] font-black text-blue-600 mb-1">#${m.id}</p>
+                                    <p class="text-[11px] font-black text-slate-900">${m.dn}</p>
+                                </div>
                             </div>
                             <div class="flex gap-2">
-                                <button onclick="openBonImpression('${m.id}')" class="bg-slate-50 p-3 rounded-2xl text-slate-400"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"></path></svg></button>
+                                <button onclick="openBonImpression('${m.id}')" class="bg-slate-50 p-3 rounded-2xl text-slate-400 hover:text-blue-600 transition-all"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"></path></svg></button>
                                 <button onclick="publierMission('${m.id}')" class="bg-blue-600 text-white px-5 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest">Assigner</button>
                             </div>
                         </div>`;
-                } else if (m.s === 1 && (userRole === 'admin' || userRole === 'livreur')) {
+                } 
+                // Vue Livreur / En cours
+                else if (m.s === 1 && (isAdmin || userRole === 'livreur')) {
                     contLiv.innerHTML += `
-                        <div class="p-6 bg-white border-l-8 border-amber-400 rounded-[2rem] mb-5 shadow-lg">
+                        <div class="p-6 bg-white border-l-8 border-amber-400 rounded-[2rem] mb-5 shadow-lg relative">
+                            ${isAdmin ? `<button onclick="deleteMission('${m.id}')" class="absolute top-4 right-4 p-2 text-slate-300 hover:text-red-500"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg></button>` : ''}
                             <div class="flex justify-between items-start mb-4">
                                 <div>
                                     <span class="text-[10px] font-black text-slate-300">#${m.id}</span>
@@ -234,22 +281,27 @@
                             </div>
                             <div class="space-y-2 mb-6">
                                 <p class="text-[11px] text-slate-500 font-bold flex items-center gap-2">📍 ${m.dq}</p>
-                                <a href="tel:${m.dt}" class="text-[11px] text-blue-600 font-black flex items-center gap-2 italic">📞 Appeler le client (${m.dt})</a>
+                                <a href="tel:${m.dt}" class="text-[11px] text-blue-600 font-black flex items-center gap-2 italic">📞 ${m.dt}</a>
                             </div>
                             <div class="grid grid-cols-2 gap-3">
-                                <button onclick="openGoogleMaps('${m.dq}')" class="bg-slate-50 text-slate-900 py-4 rounded-2xl font-black text-[10px] uppercase tracking-tighter flex items-center justify-center gap-2">🗺️ Itinéraire</button>
-                                <button onclick="openQrScanner()" class="bg-slate-900 text-white py-4 rounded-2xl font-black text-[10px] uppercase tracking-tighter flex items-center justify-center gap-2 shadow-xl shadow-slate-200">📸 Scanner & Livrer</button>
+                                <button onclick="openGoogleMaps('${m.dq}')" class="bg-slate-50 text-slate-900 py-4 rounded-2xl font-black text-[10px] uppercase tracking-tighter">🗺️ Itinéraire</button>
+                                <button onclick="openQrScanner()" class="bg-slate-900 text-white py-4 rounded-2xl font-black text-[10px] uppercase tracking-tighter shadow-xl shadow-slate-200">📸 Scanner</button>
                             </div>
                         </div>`;
-                } else if (m.s === 2) {
+                } 
+                // Archives / Livré
+                else if (m.s === 2 && (isAdmin || userRole === 'dispatch' || userRole === 'relais')) {
                     contArch.innerHTML += `
                         <tr class="border-b border-slate-800 text-[10px]">
                             <td class="p-4 font-bold text-white">${m.id}</td>
                             <td class="p-4 text-slate-300">
                                 ${m.dn}<br>
-                                <span class="text-[8px] text-slate-500">Livré par: ${m.le.split('@')[0]}</span>
+                                <span class="text-[8px] text-slate-500 uppercase">${m.le ? m.le.split('@')[0] : '...'}</span>
                             </td>
-                            <td class="p-4 text-right text-emerald-400 font-black">${m.p.toLocaleString()} CFA</td>
+                            <td class="p-4 text-right">
+                                <span class="text-emerald-400 font-black">${m.p.toLocaleString()} CFA</span>
+                                ${isAdmin ? `<button onclick="deleteMission('${m.id}')" class="ml-3 text-red-500/50 hover:text-red-500 transition-all">✕</button>` : ''}
+                            </td>
                         </tr>`;
                 }
             });
@@ -313,13 +365,13 @@
             <div class="space-y-4">
                 <img src="https://i.ibb.co/q3t8t3Rj/Gemini-Generated-Image-1pvtp31pvtp31pvt.png" class="h-24 mx-auto rounded-[2rem] shadow-xl">
                 <h1 class="text-3xl font-black tracking-tighter">CT241</h1>
-                <p class="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Portail de Service</p>
+                <p class="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Administration</p>
             </div>
             <form onsubmit="handleLogin(event)" class="space-y-4">
-                <input type="email" id="loginEmail" required class="w-full p-6 bg-slate-50 rounded-3xl text-xs font-bold border-2 border-transparent focus:border-blue-100 outline-none transition-all" placeholder="E-mail Agent">
+                <input type="email" id="loginEmail" required class="w-full p-6 bg-slate-50 rounded-3xl text-xs font-bold border-2 border-transparent focus:border-blue-100 outline-none transition-all" placeholder="E-mail">
                 <input type="password" id="loginPass" required class="w-full p-6 bg-slate-50 rounded-3xl text-xs font-bold border-2 border-transparent focus:border-blue-100 outline-none transition-all" placeholder="Mot de passe">
                 <p id="loginError" class="text-[10px] text-red-500 font-black hidden"></p>
-                <button id="loginBtn" type="submit" class="w-full bg-[#0f172a] text-white font-black py-6 rounded-3xl text-xs uppercase tracking-[0.2em] shadow-xl hover:scale-[1.02] active:scale-95 transition-all">Connexion</button>
+                <button id="loginBtn" type="submit" class="w-full bg-[#0f172a] text-white font-black py-6 rounded-3xl text-xs uppercase tracking-[0.2em] shadow-xl">Connexion</button>
             </form>
         </div>
     </section>
@@ -330,7 +382,7 @@
         <nav class="bg-white/80 backdrop-blur-xl sticky top-0 z-[100] p-5 border-b border-slate-100">
             <div class="max-w-xl mx-auto flex justify-between items-center">
                 <div class="flex items-center gap-4">
-                    <img src="https://i.ibb.co/q3t8t3Rj/Gemini-Generated-Image-1pvtp31pvtp31pvt.png" class="h-10 rounded-xl shadow-lg shadow-slate-200">
+                    <img src="https://i.ibb.co/q3t8t3Rj/Gemini-Generated-Image-1pvtp31pvtp31pvt.png" class="h-10 rounded-xl shadow-lg">
                     <div>
                         <p id="userDisplayEmail" class="text-[9px] font-black text-slate-300 uppercase tracking-tight truncate w-32">...</p>
                         <div id="badgeDisplay"></div>
@@ -342,7 +394,22 @@
             </div>
         </nav>
 
-        <div class="max-w-xl mx-auto p-6 space-y-8">
+        <div class="max-w-xl mx-auto p-6 space-y-8 pb-32">
+            <!-- ADMIN CONTROLS -->
+            <section id="adminControls" class="hidden bg-slate-900 p-8 rounded-[3rem] shadow-2xl space-y-4">
+                <h3 class="text-white font-black text-[10px] uppercase tracking-widest opacity-50">Gestion Globale</h3>
+                <div class="grid grid-cols-2 gap-4">
+                    <button onclick="downloadReport()" class="bg-blue-600 text-white p-6 rounded-[2rem] text-[10px] font-black uppercase flex flex-col items-center gap-2">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
+                        Rapport CSV
+                    </button>
+                    <button onclick="resetAccounting()" class="bg-red-600/20 text-red-500 border border-red-500/20 p-6 rounded-[2rem] text-[10px] font-black uppercase flex flex-col items-center gap-2">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                        RAZ COMPTA
+                    </button>
+                </div>
+            </section>
+
             <!-- Stats Livreur -->
             <section id="statLivreurSection" class="role-section hidden grid grid-cols-2 gap-4">
                 <div class="bg-white p-7 rounded-[2.5rem] text-center shadow-sm border border-slate-50">
@@ -357,13 +424,13 @@
 
             <!-- Création (Relais) -->
             <section id="rubrique1" class="role-section hidden">
-                <div class="bg-white rounded-[3rem] p-10 space-y-6 shadow-2xl shadow-slate-200 border border-slate-100">
+                <div class="bg-white rounded-[3rem] p-10 space-y-6 shadow-2xl border border-slate-100">
                     <div class="flex justify-between items-center">
                         <h2 class="font-black text-sm uppercase tracking-tighter">Nouveau Colis</h2>
                         <span id="displayNextId" class="text-blue-600 font-black text-xs">...</span>
                     </div>
                     <div class="space-y-3">
-                        <input type="text" id="expNom" placeholder="Boutique / Point Relais" class="w-full p-5 bg-slate-50 rounded-2xl text-xs font-bold outline-none border-2 border-transparent focus:border-blue-50">
+                        <input type="text" id="expNom" placeholder="Boutique / Point Relais" class="w-full p-5 bg-slate-50 rounded-2xl text-xs font-bold outline-none">
                         <div class="grid grid-cols-2 gap-3">
                             <input type="text" id="expQuartier" placeholder="Quartier Exp." class="p-5 bg-slate-50 rounded-2xl text-xs font-bold">
                             <input type="tel" id="expTel" placeholder="Tél Exp." class="p-5 bg-slate-50 rounded-2xl text-xs font-bold">
@@ -377,8 +444,8 @@
                             <input type="tel" id="dt" placeholder="Tél Client" class="p-5 bg-slate-50 rounded-2xl text-xs font-bold">
                         </div>
                     </div>
-                    <input type="number" id="fraisLivraison" placeholder="MONTANT À PERCEVOIR (CFA)" class="w-full p-6 bg-blue-600 text-white rounded-[2rem] text-center text-lg font-black placeholder:text-blue-300 outline-none shadow-xl shadow-blue-100">
-                    <button onclick="genererMission()" class="w-full bg-[#0f172a] text-white font-black py-6 rounded-[2rem] text-xs uppercase tracking-widest hover:bg-black transition-all">Enregistrer Bordereau</button>
+                    <input type="number" id="fraisLivraison" placeholder="À PERCEVOIR (CFA)" class="w-full p-6 bg-blue-600 text-white rounded-[2rem] text-center text-lg font-black placeholder:text-blue-300 outline-none">
+                    <button onclick="genererMission()" class="w-full bg-[#0f172a] text-white font-black py-6 rounded-[2rem] text-xs uppercase tracking-widest">Enregistrer Bordereau</button>
                 </div>
             </section>
 
@@ -412,20 +479,18 @@
     <div id="cameraModal" class="fixed inset-0 bg-black z-[1000] hidden flex flex-col items-center justify-center p-8 text-white">
         <div class="text-center space-y-8 max-w-xs">
             <div class="w-28 h-28 bg-white/10 rounded-full flex items-center justify-center text-6xl mx-auto">📸</div>
-            <h2 class="text-2xl font-black tracking-tight">Preuve de Livraison</h2>
-            <p class="text-slate-500 text-xs font-bold">Prenez une photo claire du bordereau signé ou du colis remis au client.</p>
+            <h2 class="text-2xl font-black tracking-tight">Preuve Photo</h2>
             <input type="file" id="fileInput" accept="image/*" capture="camera" class="hidden" onchange="processImage(this.files[0])">
-            <button onclick="document.getElementById('fileInput').click()" class="w-full bg-white text-black font-black py-6 rounded-[2rem] shadow-2xl uppercase text-xs tracking-widest">Ouvrir l'appareil photo</button>
-            <button onclick="document.getElementById('cameraModal').classList.add('hidden')" class="text-slate-400 font-bold text-xs uppercase tracking-widest">Plus tard</button>
+            <button onclick="document.getElementById('fileInput').click()" class="w-full bg-white text-black font-black py-6 rounded-[2rem] uppercase text-xs">Ouvrir l'appareil</button>
+            <button onclick="document.getElementById('cameraModal').classList.add('hidden')" class="text-slate-500 font-bold text-xs uppercase">Annuler</button>
         </div>
     </div>
 
     <!-- MODAL SCANNER QR -->
     <div id="qrScannerModal" class="fixed inset-0 bg-black/95 z-[900] hidden flex flex-col items-center justify-center p-8">
         <div class="w-full max-w-sm space-y-8">
-            <h2 class="text-xl font-black text-white text-center uppercase tracking-widest">Validation par QR</h2>
             <div id="reader" class="rounded-[3rem] overflow-hidden bg-slate-800 border-4 border-white/5 shadow-2xl"></div>
-            <button onclick="document.getElementById('qrScannerModal').classList.add('hidden'); if(html5QrCode) html5QrCode.stop();" class="w-full bg-red-600 text-white py-6 rounded-[2rem] font-black text-xs uppercase tracking-widest">Annuler le Scan</button>
+            <button onclick="document.getElementById('qrScannerModal').classList.add('hidden'); if(html5QrCode) html5QrCode.stop();" class="w-full bg-red-600 text-white py-6 rounded-[2rem] font-black text-xs uppercase tracking-widest">Fermer</button>
         </div>
     </div>
 
