@@ -14,7 +14,11 @@
 
     <link rel="manifest" id="pwa-manifest">
     <link rel="icon" type="image/png" href="https://i.ibb.co/q3t8t3Rj/Gemini-Generated-Image-1pvtp31pvtp31pvt.png">
+    
+    <!-- Scripts Externes : UI & QR -->
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+    <script src="https://unpkg.com/html5-qrcode"></script>
     
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-app.js";
@@ -171,20 +175,28 @@
         const renderStats = () => {
             const stats = calculateStats();
             if (userRole === 'admin') {
-                document.getElementById('dashCaTotal').innerText = stats.caTotal.toLocaleString() + ' CFA';
-                document.getElementById('dashCaJour').innerText = stats.caJour.toLocaleString() + ' CFA';
-                document.getElementById('dashLivTotal').innerText = stats.livraisonsTotal;
+                const caT = document.getElementById('dashCaTotal');
+                const caJ = document.getElementById('dashCaJour');
+                const livT = document.getElementById('dashLivTotal');
+                if(caT) caT.innerText = stats.caTotal.toLocaleString() + ' CFA';
+                if(caJ) caJ.innerText = stats.caJour.toLocaleString() + ' CFA';
+                if(livT) livT.innerText = stats.livraisonsTotal;
                 const list = document.getElementById('dashLivreursList');
-                list.innerHTML = "";
-                Object.entries(stats.livreurs).forEach(([email, data]) => {
-                    list.innerHTML += `<div class="flex justify-between p-3 bg-slate-800 rounded-xl mb-2 text-[10px]"><span class="text-white truncate w-32">${email}</span><span class="text-yellow-500 font-black">${data.count} missions</span><span class="text-emerald-500 font-black">+${data.bonus}</span></div>`;
-                });
+                if(list) {
+                   list.innerHTML = "";
+                   Object.entries(stats.livreurs).forEach(([email, data]) => {
+                       list.innerHTML += `<div class="flex justify-between p-3 bg-slate-800 rounded-xl mb-2 text-[10px]"><span class="text-white truncate w-32">${email}</span><span class="text-yellow-500 font-black">${data.count} missions</span><span class="text-emerald-500 font-black">+${data.bonus}</span></div>`;
+                   });
+                }
             }
             if (userRole === 'livreur') {
                 const my = stats.livreurs[currentUser.email] || { count: 0, bonus: 0 };
-                document.getElementById('myCount').innerText = my.count;
-                document.getElementById('myBonus').innerText = my.bonus + ' CFA';
-                document.getElementById('progBar').style.width = Math.min((my.count / 17) * 100, 100) + '%';
+                const mC = document.getElementById('myCount');
+                const mB = document.getElementById('myBonus');
+                const pB = document.getElementById('progBar');
+                if(mC) mC.innerText = my.count;
+                if(mB) mB.innerText = my.bonus + ' CFA';
+                if(pB) pB.style.width = Math.min((my.count / 17) * 100, 100) + '%';
             }
         };
 
@@ -199,29 +211,39 @@
                 const delBtn = userRole === 'admin' ? `<button onclick="supprimerMission('${m.id}')" class="p-2 text-red-400 bg-red-500/10 rounded-lg"><svg class="w-3 h-3" fill="currentColor" viewBox="0 0 24 24"><path d="M3 6h18v2H3V6m2 3h14v13c0 1.1-.9 2-2 2H7c-1.1 0-2-.9-2-2V9m3 3v8h2v-8H8m4 0v8h2v-8h-2m4 0v8h2v-8h-2Z"/></svg></button>` : '';
 
                 if (m.s === 0 && (userRole === 'admin' || userRole === 'dispatch')) {
-                    containers.dispatch.innerHTML += `
-                    <div class="p-4 bg-white border border-slate-100 rounded-2xl mb-3 shadow-sm flex justify-between items-center">
-                        <div class="text-[11px]"><span class="font-black text-blue-600 block">${m.id}</span><b>${m.dn}</b><br><span class="text-slate-400">${m.dq}</span></div>
-                        <div class="flex gap-2">
-                            ${delBtn}
-                            <button onclick="openBonImpression('${m.id}')" class="bg-slate-100 text-slate-600 text-[9px] px-3 py-2 rounded-xl font-bold uppercase">Bon d'impression</button>
-                            <button onclick="publierMission('${m.id}')" class="bg-blue-600 text-white text-[10px] px-5 py-2 rounded-xl font-bold uppercase">Expédier</button>
-                        </div>
-                    </div>`;
+                    if(containers.dispatch) {
+                        containers.dispatch.innerHTML += `
+                        <div class="p-4 bg-white border border-slate-100 rounded-2xl mb-3 shadow-sm flex justify-between items-center">
+                            <div class="text-[11px]"><span class="font-black text-blue-600 block">${m.id}</span><b>${m.dn}</b><br><span class="text-slate-400">${m.dq}</span></div>
+                            <div class="flex gap-2">
+                                ${delBtn}
+                                <button onclick="openBonImpression('${m.id}')" class="bg-slate-100 text-slate-600 text-[9px] px-3 py-2 rounded-xl font-bold uppercase">Bon d'impression</button>
+                                <button onclick="publierMission('${m.id}')" class="bg-blue-600 text-white text-[10px] px-5 py-2 rounded-xl font-bold uppercase">Expédier</button>
+                            </div>
+                        </div>`;
+                    }
                 } else if (m.s === 1 && (userRole === 'admin' || userRole === 'livreur')) {
-                    containers.livreur.innerHTML += `
-                    <div class="p-5 bg-amber-50 border border-amber-200 rounded-3xl mb-4 space-y-3">
-                        <div class="flex justify-between font-black text-amber-700"><span>${m.id}</span><span class="text-[9px] uppercase">En cours</span></div>
-                        <p class="text-[11px] text-amber-900"><b>Lieu:</b> ${m.dq}<br><b>Contact:</b> ${m.dn} (${m.dt})</p>
-                        <div class="flex gap-2">
-                             <button onclick="openBonImpression('${m.id}')" class="flex-1 bg-white border border-amber-200 text-amber-700 font-black py-4 rounded-2xl text-[10px]">VOIR BON</button>
-                             <button onclick="openCamera('${m.id}')" class="flex-[2] bg-amber-500 text-white font-black py-4 rounded-2xl shadow-lg">LIVRÉ</button>
-                        </div>
-                    </div>`;
+                    if(containers.livreur) {
+                        containers.livreur.innerHTML += `
+                        <div class="p-5 bg-amber-50 border border-amber-200 rounded-3xl mb-4 space-y-3">
+                            <div class="flex justify-between font-black text-amber-700"><span>${m.id}</span><span class="text-[9px] uppercase">En cours</span></div>
+                            <p class="text-[11px] text-amber-900"><b>Lieu:</b> ${m.dq}<br><b>Contact:</b> ${m.dn} (${m.dt})</p>
+                            <div class="flex flex-col gap-2">
+                                 <button onclick="openQrScanner()" class="w-full bg-slate-900 text-white font-black py-4 rounded-2xl shadow-lg flex items-center justify-center gap-2">
+                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h3m-3 3h3m5 1.412V17a1 1 0 01-1 1h-2.586l-2.828 2.828A1 1 0 0110 20.414V18H7a1 1 0 01-1-1v-2.586l-2.828-2.828A1 1 0 013.586 10H6V7a1 1 0 011-1h2.586l2.828-2.828A1 1 0 0114 3.586V6h3a1 1 0 011 1v2.586l2.828 2.828z" /></svg>
+                                    SCANNER POUR LIVRER
+                                 </button>
+                                 <div class="flex gap-2">
+                                     <button onclick="openBonImpression('${m.id}')" class="flex-1 bg-white border border-amber-200 text-amber-700 font-black py-3 rounded-2xl text-[10px]">VOIR BON</button>
+                                     <button onclick="openCamera('${m.id}')" class="flex-1 bg-amber-200 text-amber-800 font-black py-3 rounded-2xl text-[10px]">FORCE LIVRER</button>
+                                 </div>
+                            </div>
+                        </div>`;
+                    }
                 }
 
                 if ((userRole === 'admin' || userRole === 'dispatch' || (userRole === 'relais' && isMyColis)) && m.s === 2) {
-                    if (!searchQuery || m.id.toLowerCase().includes(searchQuery) || m.dn.toLowerCase().includes(searchQuery)) {
+                    if (containers.archives && (!searchQuery || m.id.toLowerCase().includes(searchQuery) || m.dn.toLowerCase().includes(searchQuery))) {
                         containers.archives.innerHTML += `
                         <tr class="border-b border-slate-800 text-[10px] hover:bg-slate-800 transition">
                             <td onclick="openArchiveDetail('${m.id}')" class="p-4 font-bold text-white">${m.id}</td>
@@ -232,7 +254,8 @@
                     }
                 }
             });
-            document.getElementById('archiveCount').innerText = containers.archives.children.length;
+            const aC = document.getElementById('archiveCount');
+            if(aC && containers.archives) aC.innerText = containers.archives.children.length;
         };
 
         // --- CAMERA & PHOTO ---
@@ -251,10 +274,58 @@
             };
             reader.readAsDataURL(file);
         };
-        const finalizeDelivery = async (photo) => {
-            await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'missions', currentMissionId), { s: 2, img: photo, le: currentUser.email, lk: new Date().toISOString().split('T')[0] });
+
+        const finalizeDelivery = async (photo = null) => {
+            if(!currentMissionId) return;
+            const dataUpdate = { 
+                s: 2, 
+                le: currentUser.email, 
+                lk: new Date().toISOString().split('T')[0] 
+            };
+            if(photo) dataUpdate.img = photo;
+            
+            await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'missions', currentMissionId), dataUpdate);
             document.getElementById('cameraModal').classList.add('hidden');
             showToast("Livraison Validée !", "success");
+            currentMissionId = null;
+        };
+
+        // --- QR SCANNER LOGIQUE ---
+        let html5QrCode = null;
+        window.openQrScanner = () => {
+            document.getElementById('qrScannerModal').classList.remove('hidden');
+            html5QrCode = new Html5Qrcode("reader");
+            const config = { fps: 10, qrbox: { width: 250, height: 250 } };
+            html5QrCode.start({ facingMode: "environment" }, config, (decodedText) => {
+                handleQrResult(decodedText);
+            }).catch(() => {
+                showToast("Erreur caméra", "error");
+                closeQrScanner();
+            });
+        };
+
+        window.closeQrScanner = () => {
+            if(html5QrCode) {
+                html5QrCode.stop().then(() => {
+                    document.getElementById('qrScannerModal').classList.add('hidden');
+                }).catch(() => {
+                    document.getElementById('qrScannerModal').classList.add('hidden');
+                });
+            } else {
+                document.getElementById('qrScannerModal').classList.add('hidden');
+            }
+        };
+
+        const handleQrResult = (text) => {
+            const cleanId = text.replace('CT241-', '');
+            const m = allMissions.find(x => x.id === cleanId);
+            if(m && m.s === 1) {
+                currentMissionId = m.id;
+                closeQrScanner();
+                finalizeDelivery();
+            } else {
+                showToast("QR Code Invalide", "error");
+            }
         };
 
         window.handleSearch = (v) => { searchQuery = v.toLowerCase(); renderUI(); };
@@ -264,7 +335,7 @@
             el.classList.remove('hidden'); setTimeout(() => el.classList.add('hidden'), 3000);
         };
 
-        // --- DÉTAILS & BON D'IMPRESSION PROFESSIONNEL ---
+        // --- BON D'IMPRESSION AVEC QR CODE ---
         window.openBonImpression = (id) => {
             const m = allMissions.find(x => x.id === id);
             const natureMap = ["Standard", "Repas", "Documents", "Pharma"];
@@ -272,7 +343,6 @@
             
             document.getElementById('detailContent').innerHTML = `
                 <div class="print-area bg-white p-6 md:p-12 text-slate-900 min-h-screen flex flex-col">
-                    <!-- HEADER LOGISTICIEN -->
                     <div class="flex justify-between items-start mb-8 pb-8 border-b-2 border-slate-100">
                         <div class="flex items-center gap-4">
                             <div class="w-16 h-16 bg-slate-900 rounded-2xl flex items-center justify-center">
@@ -297,7 +367,6 @@
                         </div>
                     </div>
 
-                    <!-- BLOC EXPÉDITEUR / DESTINATAIRE -->
                     <div class="grid grid-cols-2 gap-12 mb-12">
                         <div class="relative">
                             <div class="absolute -left-4 top-0 bottom-0 w-1 bg-emerald-500 rounded-full"></div>
@@ -319,24 +388,19 @@
                         </div>
                     </div>
 
-                    <!-- TABLEAU DES DÉTAILS -->
                     <div class="flex-grow">
                         <table class="w-full text-left mb-8 border-collapse">
                             <thead>
                                 <tr class="bg-slate-50 border-y border-slate-100">
-                                    <th class="py-4 px-4 text-[10px] font-black uppercase text-slate-400 tracking-widest">Description de la marchandise</th>
-                                    <th class="py-4 px-4 text-[10px] font-black uppercase text-slate-400 tracking-widest">Nature</th>
+                                    <th class="py-4 px-4 text-[10px] font-black uppercase text-slate-400 tracking-widest">Marchandise</th>
                                     <th class="py-4 px-4 text-[10px] font-black uppercase text-slate-400 tracking-widest text-right">Valeur Déclarée</th>
                                 </tr>
                             </thead>
-                            <tbody class="divide-y divide-slate-50">
+                            <tbody>
                                 <tr>
                                     <td class="py-6 px-4">
-                                        <p class="text-sm font-black text-slate-900">Envoi Standard CT241</p>
-                                        <p class="text-[10px] text-slate-400 mt-1 font-medium italic">Vérifié et scellé par nos agents de dispatch</p>
-                                    </td>
-                                    <td class="py-6 px-4">
-                                        <span class="inline-block px-3 py-1 bg-slate-100 rounded-full text-[10px] font-black text-slate-700 uppercase">${natureMap[m.n]}</span>
+                                        <p class="text-sm font-black text-slate-900">Envoi Standard (${natureMap[m.n]})</p>
+                                        <p class="text-[10px] text-slate-400 mt-1">Colis scellé CT241</p>
                                     </td>
                                     <td class="py-6 px-4 text-right">
                                         <p class="text-sm font-black text-slate-900">${m.v.toLocaleString()} CFA</p>
@@ -345,63 +409,58 @@
                             </tbody>
                         </table>
 
-                        <!-- RÉCAPITULATIF FINANCIER -->
-                        <div class="flex justify-end mb-12">
+                        <div class="flex justify-between items-center mb-12">
+                            <div id="qrcode" class="p-2 border-2 border-slate-100 rounded-2xl"></div>
                             <div class="w-72 space-y-3">
                                 <div class="flex justify-between items-center text-[10px] font-bold text-slate-500 uppercase">
                                     <span>Frais de service</span>
                                     <span>${m.p.toLocaleString()} CFA</span>
                                 </div>
                                 <div class="flex justify-between items-center text-[10px] font-bold text-slate-500 uppercase">
-                                    <span>Mode de paiement</span>
+                                    <span>Mode</span>
                                     <span class="text-slate-900">${modeMap[m.r]}</span>
                                 </div>
-                                <div class="h-px bg-slate-200 my-4"></div>
+                                <div class="h-px bg-slate-200 my-2"></div>
                                 <div class="flex justify-between items-center">
-                                    <span class="text-xs font-black uppercase text-slate-900">Total net à payer</span>
+                                    <span class="text-xs font-black uppercase text-slate-900">À Payer</span>
                                     <span class="text-2xl font-black text-slate-900">${m.p.toLocaleString()} CFA</span>
                                 </div>
                             </div>
                         </div>
                     </div>
 
-                    <!-- BLOC DE VALIDATION (SIGNATURES) -->
                     <div class="grid grid-cols-3 gap-6 mb-12 pt-12 border-t border-slate-100">
                         <div class="space-y-4">
                             <h4 class="text-[9px] font-black uppercase tracking-tighter text-slate-400">Signature Expéditeur</h4>
-                            <div class="h-24 border border-dashed border-slate-200 rounded-2xl flex items-center justify-center italic text-[9px] text-slate-300">Cachet & Signature</div>
+                            <div class="h-20 border border-dashed border-slate-200 rounded-2xl"></div>
                         </div>
                         <div class="space-y-4">
-                            <h4 class="text-[9px] font-black uppercase tracking-tighter text-slate-400">Prise en charge Livreur</h4>
-                            <div class="h-24 border border-dashed border-slate-200 rounded-2xl p-3 flex flex-col justify-end">
-                                <p class="text-[8px] font-bold text-slate-400 border-t border-slate-50 pt-2">Nom du chauffeur</p>
-                            </div>
+                            <h4 class="text-[9px] font-black uppercase tracking-tighter text-slate-400">Livreur</h4>
+                            <div class="h-20 border border-dashed border-slate-200 rounded-2xl"></div>
                         </div>
                         <div class="space-y-4">
-                            <h4 class="text-[9px] font-black uppercase tracking-tighter text-slate-900">Accusé de Réception Client</h4>
-                            <div class="h-24 bg-slate-50 border-2 border-slate-900 rounded-2xl p-3 flex flex-col justify-between">
-                                <p class="text-[7px] font-bold text-slate-400 italic">"Je reconnais avoir reçu mon colis en bon état"</p>
-                                <p class="text-[8px] font-black text-slate-900 border-t border-slate-200 pt-2">Date: ___/___/2026 à ___h___</p>
-                            </div>
+                            <h4 class="text-[9px] font-black uppercase tracking-tighter text-slate-900">Réception Client</h4>
+                            <div class="h-20 bg-slate-50 border-2 border-slate-900 rounded-2xl"></div>
                         </div>
                     </div>
 
-                    <!-- QR CODE & MENTIONS -->
-                    <div class="flex justify-between items-end border-t border-slate-100 pt-6">
-                        <div class="max-w-md space-y-2">
-                            <p class="text-[8px] font-black uppercase text-slate-900">Conditions Générales de Transport</p>
-                            <p class="text-[7px] leading-relaxed text-slate-400">
-                                La responsabilité du transporteur est engagée uniquement sur la valeur déclarée. En cas de non-déclaration, le forfait minimum s'applique.
-                                Toute réclamation doit être formulée par écrit dans les 24 heures suivant la réception. CT241 n'est pas responsable des retards liés à la circulation ou aux contrôles routiers.
-                            </p>
-                        </div>
-                        <div class="text-right">
-                        <img src="https://api.qrserver.com/v1/create-qr-code/?size=100x100&data=tel:%2B24177736065" class="w-16 h-16 ml-auto mb-2 opacity-80 grayscale">
-                        <p class="text-[7px] font-black uppercase tracking-widest text-slate-400">Authentification CT241 Express</p>
-                        </div>
+                    <div class="text-center text-[7px] text-slate-400 uppercase font-bold tracking-[0.3em]">
+                        Le scan de ce bon est obligatoire pour valider la livraison
                     </div>
                 </div>`;
             document.getElementById('detailModal').classList.remove('hidden');
+            
+            // Génération asynchrone du QR Code
+            setTimeout(() => {
+                new QRCode(document.getElementById("qrcode"), {
+                    text: "CT241-" + m.id,
+                    width: 100,
+                    height: 100,
+                    colorDark : "#0f172a",
+                    colorLight : "#ffffff",
+                    correctLevel : QRCode.CorrectLevel.H
+                });
+            }, 100);
         };
 
         window.openArchiveDetail = (id) => {
@@ -409,10 +468,10 @@
             document.getElementById('detailContent').innerHTML = `
                 <div class="bg-white p-6 space-y-4">
                     <div class="flex justify-between items-center pb-4 border-b border-slate-100">
-                        <h2 class="text-xl font-black">Preuve Numérique : ${m.id}</h2>
+                        <h2 class="text-xl font-black">Preuve : ${m.id}</h2>
                         <span class="bg-emerald-100 text-emerald-700 px-3 py-1 rounded-full font-black text-[10px]">LIVRÉ</span>
                     </div>
-                    ${m.img ? `<img src="${m.img}" class="w-full rounded-3xl shadow-lg border-4 border-white">` : '<div class="h-40 bg-slate-100 flex items-center justify-center italic text-slate-400 rounded-3xl text-sm">Pas de photo de preuve</div>'}
+                    ${m.img ? `<img src="${m.img}" class="w-full rounded-3xl shadow-lg">` : '<div class="h-40 bg-slate-100 flex items-center justify-center italic text-slate-400 rounded-3xl text-sm">Validé par QR Code / Sans Photo</div>'}
                     <div class="grid grid-cols-2 gap-4 text-[11px]">
                         <div class="bg-slate-50 p-4 rounded-2xl">
                             <p class="text-slate-500 font-bold uppercase mb-1">Destinataire</p>
@@ -422,7 +481,7 @@
                         <div class="bg-slate-50 p-4 rounded-2xl">
                             <p class="text-slate-500 font-bold uppercase mb-1">Agent Livreur</p>
                             <p class="font-black text-slate-900">${m.le || 'Inconnu'}</p>
-                            <p>Livré le : ${m.lk || 'Date inconnue'}</p>
+                            <p>Le : ${m.lk || '...'}</p>
                         </div>
                     </div>
                 </div>`;
@@ -476,11 +535,8 @@
         </nav>
 
         <div class="max-w-xl mx-auto p-4 space-y-6">
-            <!-- DASHBOARD ADMIN / ANALYTICS -->
+            <!-- DASHBOARD ADMIN -->
             <section id="adminDash" class="role-section hidden space-y-4">
-                <div class="flex justify-between items-center">
-                    <h3 class="text-[10px] font-black text-slate-400 uppercase tracking-widest">Performance Flotte</h3>
-                </div>
                 <div class="grid grid-cols-3 gap-3">
                     <div class="bg-white p-4 rounded-3xl shadow-sm border border-slate-100 text-center"><span class="text-[8px] font-black text-slate-400 uppercase">CA Total</span><div id="dashCaTotal" class="text-[11px] font-black text-slate-900">0</div></div>
                     <div class="bg-white p-4 rounded-3xl shadow-sm border border-slate-100 text-center"><span class="text-[8px] font-black text-slate-400 uppercase">CA Jour</span><div id="dashCaJour" class="text-[11px] font-black text-emerald-600">0</div></div>
@@ -489,7 +545,7 @@
                 <div class="bg-slate-900 p-5 rounded-[2rem] space-y-2 shadow-2xl" id="dashLivreursList"></div>
             </section>
 
-            <!-- BOUTIQUE / RELAIS : CRÉATION -->
+            <!-- CRÉATION BORDEREAU -->
             <section id="rubrique1" class="role-section hidden">
                 <div class="bg-white rounded-[2.5rem] shadow-xl border border-slate-100 overflow-hidden">
                     <div class="bg-slate-900 p-6 text-white flex justify-between items-center">
@@ -497,27 +553,21 @@
                         <div class="w-10 h-10 bg-white/10 rounded-xl flex items-center justify-center text-xl">✍️</div>
                     </div>
                     <div class="p-6 space-y-4">
-                        <div class="space-y-4">
-                            <label class="text-[9px] font-black uppercase text-slate-400 ml-2">Infos Expéditeur</label>
-                            <input type="text" id="expNom" placeholder="Nom Boutique / Expéditeur" class="w-full p-4 bg-slate-50 rounded-2xl font-bold text-[11px] outline-none border-2 border-transparent focus:border-slate-900 transition-all">
-                            <div class="grid grid-cols-2 gap-3">
-                                <input type="text" id="expQuartier" placeholder="Quartier" class="p-4 bg-slate-50 rounded-2xl font-bold text-[11px] outline-none">
-                                <input type="tel" id="expTel" placeholder="Tél Expéditeur" class="p-4 bg-slate-50 rounded-2xl font-bold text-[11px] outline-none">
-                            </div>
+                        <input type="text" id="expNom" placeholder="Nom Boutique / Expéditeur" class="w-full p-4 bg-slate-50 rounded-2xl font-bold text-[11px] outline-none">
+                        <div class="grid grid-cols-2 gap-3">
+                            <input type="text" id="expQuartier" placeholder="Quartier" class="p-4 bg-slate-50 rounded-2xl font-bold text-[11px] outline-none">
+                            <input type="tel" id="expTel" placeholder="Tél Expéditeur" class="p-4 bg-slate-50 rounded-2xl font-bold text-[11px] outline-none">
                         </div>
-                        <div class="h-px bg-slate-100 my-4"></div>
-                        <div class="space-y-4">
-                            <label class="text-[9px] font-black uppercase text-slate-400 ml-2">Infos Destinataire</label>
-                            <input type="text" id="destNom" placeholder="Nom complet du client" class="w-full p-4 bg-slate-50 rounded-2xl font-bold text-[11px] outline-none border-2 border-transparent focus:border-blue-600 transition-all">
-                            <div class="grid grid-cols-2 gap-3">
-                                <select id="destQuartier" class="p-4 bg-slate-50 rounded-2xl font-bold text-[11px] outline-none">
-                                    <option value="" disabled selected>Choisir la Zone</option>
-                                    <option>Angondjé</option><option>Nzeng-Ayong</option><option>Oloumi</option><option>Akanda</option><option>Owendo</option><option>Pk0-12s</option><option>Glass</option>
-                                </select>
-                                <input type="tel" id="destTel" placeholder="Tél du client" class="p-4 bg-slate-50 rounded-2xl font-bold text-[11px] outline-none">
-                            </div>
+                        <div class="h-px bg-slate-100 my-2"></div>
+                        <input type="text" id="destNom" placeholder="Nom complet du client" class="w-full p-4 bg-slate-50 rounded-2xl font-bold text-[11px] outline-none border-2 border-transparent focus:border-blue-600 transition-all">
+                        <div class="grid grid-cols-2 gap-3">
+                            <select id="destQuartier" class="p-4 bg-slate-50 rounded-2xl font-bold text-[11px] outline-none">
+                                <option value="" disabled selected>Choisir la Zone</option>
+                                <option>Angondjé</option><option>Nzeng-Ayong</option><option>Oloumi</option><option>Akanda</option><option>Owendo</option><option>Pk0-12s</option><option>Glass</option>
+                            </select>
+                            <input type="tel" id="destTel" placeholder="Tél du client" class="p-4 bg-slate-50 rounded-2xl font-bold text-[11px] outline-none">
                         </div>
-                        <div class="grid grid-cols-2 gap-3 pt-2">
+                        <div class="grid grid-cols-2 gap-3">
                             <select id="natureColis" class="p-4 bg-slate-900 text-white rounded-2xl font-black text-[10px] outline-none">
                                 <option value="0">📦 Envoi Standard</option><option value="1">🍟 Repas / Frais</option><option value="2">📁 Courrier / Doc</option><option value="3">💊 Pharmacie</option>
                             </select>
@@ -526,38 +576,32 @@
                             </select>
                         </div>
                         <div class="grid grid-cols-2 gap-3">
-                            <input type="number" id="valeurDeclaree" placeholder="Valeur Marchandise" class="p-4 bg-slate-50 rounded-2xl font-bold text-[11px] outline-none">
+                            <input type="number" id="valeurDeclaree" placeholder="Valeur" class="p-4 bg-slate-50 rounded-2xl font-bold text-[11px] outline-none">
                             <input type="number" id="fraisLivraison" placeholder="PRIX LIVRAISON" class="p-4 bg-blue-600 text-white rounded-2xl font-black text-[11px] outline-none placeholder:text-blue-200">
                         </div>
-                        <button onclick="genererMission()" class="w-full bg-slate-900 text-white font-black py-5 rounded-3xl shadow-xl hover:bg-black transition-all text-[11px] uppercase tracking-[0.2em]">Générer le Bon</button>
+                        <button onclick="genererMission()" class="w-full bg-slate-900 text-white font-black py-5 rounded-3xl shadow-xl hover:bg-black transition-all text-[11px] uppercase tracking-[0.2em]">Enregistrer & Créer QR</button>
                     </div>
                 </div>
             </section>
 
-            <!-- DISPATCH / ADMIN : MISSIONS EN ATTENTE -->
             <section id="rubrique2" class="role-section hidden">
-                <h3 class="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4 ml-2">Dispatching (En attente)</h3>
+                <h3 class="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4 ml-2">Dispatching (Attente)</h3>
                 <div id="containerDispatch"></div>
             </section>
 
-            <!-- LIVREUR : MISSIONS ACTIVES -->
             <section id="rubrique3" class="role-section hidden">
-                <h3 class="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4 ml-2">Mes Livraisons Actives</h3>
+                <h3 class="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4 ml-2">Missions Actives</h3>
                 <div id="containerLivreur"></div>
             </section>
 
-            <!-- HISTORIQUE / ARCHIVES -->
             <section id="rubrique4" class="role-section hidden">
                 <div class="bg-white rounded-[2.5rem] overflow-hidden shadow-xl border border-slate-100">
                     <div class="p-6 border-b border-slate-50">
                         <div class="flex justify-between items-center mb-6">
                             <h2 class="text-slate-900 font-black text-xs uppercase tracking-tight">Archives Numériques</h2>
-                            <div id="archiveCount" class="bg-slate-900 text-white font-black text-[9px] px-3 py-1 rounded-full tracking-tighter">0</div>
+                            <div id="archiveCount" class="bg-slate-900 text-white font-black text-[9px] px-3 py-1 rounded-full">0</div>
                         </div>
-                        <div class="relative">
-                             <input type="text" oninput="handleSearch(this.value)" placeholder="Rechercher par ID ou Nom..." class="w-full p-4 bg-slate-50 rounded-2xl text-[11px] text-slate-900 font-bold outline-none border-2 border-transparent focus:border-slate-900 transition-all">
-                             <span class="absolute right-4 top-1/2 -translate-y-1/2 opacity-20">🔍</span>
-                        </div>
+                        <input type="text" oninput="handleSearch(this.value)" placeholder="Rechercher..." class="w-full p-4 bg-slate-50 rounded-2xl text-[11px] font-bold outline-none">
                     </div>
                     <div class="overflow-x-auto">
                         <table class="w-full text-left">
@@ -571,24 +615,33 @@
 
     <!-- MODAL DÉTAILS / PRINT -->
     <div id="detailModal" class="fixed inset-0 bg-slate-950/95 z-[400] hidden flex items-center justify-center p-0 md:p-8">
-        <div class="w-full max-w-4xl bg-white md:rounded-[3rem] overflow-y-auto max-h-screen md:max-h-[95vh] animate-in slide-in-from-bottom duration-500 shadow-2xl">
+        <div class="w-full max-w-4xl bg-white md:rounded-[3rem] overflow-y-auto max-h-screen md:max-h-[95vh] shadow-2xl">
             <div id="detailContent"></div>
             <div class="p-8 bg-slate-50 flex gap-3 no-print border-t border-slate-100 sticky bottom-0">
-                <button onclick="window.print()" class="flex-1 bg-slate-900 text-white font-black py-5 rounded-3xl text-[11px] uppercase tracking-widest shadow-xl hover:bg-black transition-colors">🖨️ Lancer l'impression</button>
-                <button onclick="document.getElementById('detailModal').classList.add('hidden')" class="px-10 bg-white border border-slate-200 text-slate-500 font-black py-5 rounded-3xl text-[11px] uppercase tracking-widest">Quitter</button>
+                <button onclick="window.print()" class="flex-1 bg-slate-900 text-white font-black py-5 rounded-3xl text-[11px] uppercase tracking-widest">🖨️ Imprimer le Bordereau</button>
+                <button onclick="document.getElementById('detailModal').classList.add('hidden')" class="px-10 bg-white border border-slate-200 text-slate-500 font-black py-5 rounded-3xl text-[11px] uppercase tracking-widest">Fermer</button>
             </div>
         </div>
     </div>
 
-    <!-- MODAL CAMERA -->
+    <!-- MODAL SCANNER QR -->
+    <div id="qrScannerModal" class="fixed inset-0 bg-black z-[500] hidden flex flex-col items-center justify-center p-6 text-white">
+        <div class="w-full max-w-md bg-white/10 backdrop-blur-xl rounded-[3rem] p-8 space-y-6">
+            <h2 class="text-xl font-black text-center uppercase tracking-widest">Scan de Validation</h2>
+            <div id="reader" class="rounded-3xl overflow-hidden bg-black aspect-square border-4 border-white/20"></div>
+            <button onclick="closeQrScanner()" class="w-full bg-red-600 text-white font-black py-4 rounded-2xl uppercase text-[10px]">Annuler le Scan</button>
+        </div>
+    </div>
+
+    <!-- MODAL PHOTO PREUVE -->
     <div id="cameraModal" class="fixed inset-0 bg-black z-[300] hidden flex flex-col items-center justify-center p-8 text-white">
         <div class="text-center space-y-8 max-w-xs">
             <div class="w-24 h-24 bg-white/10 rounded-full flex items-center justify-center text-5xl mx-auto">📸</div>
             <h2 class="text-2xl font-black">Preuve de Livraison</h2>
-            <p class="text-slate-500 text-xs">Prenez une photo claire du colis ou du bon de livraison dûment signé par le client.</p>
+            <p class="text-slate-500 text-xs italic">Optionnel : Si le scan QR est impossible, prenez une photo de la signature client.</p>
             <input type="file" id="fileInput" accept="image/*" capture="camera" class="hidden" onchange="processImage(this.files[0])">
-            <button onclick="document.getElementById('fileInput').click()" class="w-full bg-white text-black font-black py-5 rounded-3xl shadow-2xl uppercase text-[11px] tracking-widest">Ouvrir l'appareil</button>
-            <button onclick="document.getElementById('cameraModal').classList.add('hidden')" class="text-slate-600 text-[10px] font-bold underline uppercase tracking-widest">Abandonner</button>
+            <button onclick="document.getElementById('fileInput').click()" class="w-full bg-white text-black font-black py-5 rounded-3xl shadow-2xl uppercase text-[11px] tracking-widest">Appareil Photo</button>
+            <button onclick="document.getElementById('cameraModal').classList.add('hidden')" class="text-slate-600 text-[10px] font-bold underline">Retour</button>
         </div>
     </div>
 
