@@ -46,18 +46,27 @@
         let searchQuery = "";
         let filterToday = false;
 
-        // --- AUTH ---
+        // --- AUTH & ROLES ---
         window.handleLogin = async (e) => {
             e.preventDefault();
-            const email = document.getElementById('loginEmail').value;
+            const email = document.getElementById('loginEmail').value.trim();
             const pass = document.getElementById('loginPass').value;
             const btn = document.getElementById('loginBtn');
+            const errorEl = document.getElementById('loginError');
+            
             btn.disabled = true;
-            btn.innerText = "Connexion...";
-            try { await signInWithEmailAndPassword(auth, email, pass); } 
+            btn.innerText = "Vérification...";
+            errorEl.classList.add('hidden');
+
+            try { 
+                await signInWithEmailAndPassword(auth, email, pass); 
+            } 
             catch (error) { 
-                document.getElementById('loginError').classList.remove('hidden');
-                btn.disabled = false; btn.innerText = "ACCÉDER AU PORTAIL";
+                console.error("Erreur login:", error.code);
+                errorEl.innerText = "Email ou mot de passe incorrect.";
+                errorEl.classList.remove('hidden');
+                btn.disabled = false; 
+                btn.innerText = "ACCÉDER AU PORTAIL";
             }
         };
 
@@ -66,14 +75,24 @@
         onAuthStateChanged(auth, (user) => {
             if (user) {
                 currentUser = user;
-                assignRole(user.email);
-                document.getElementById('authSection').classList.add('hidden');
-                document.getElementById('appContent').classList.remove('hidden');
-                document.getElementById('userDisplayEmail').innerText = user.email;
-                startListeners();
-                prepareNextId();
+                const success = assignRole(user.email);
+                if (success) {
+                    document.getElementById('authSection').classList.add('hidden');
+                    document.getElementById('appContent').classList.remove('hidden');
+                    document.getElementById('userDisplayEmail').innerText = user.email;
+                    startListeners();
+                    prepareNextId();
+                } else {
+                    // Si l'utilisateur est authentifié mais n'a pas de rôle reconnu
+                    signOut(auth);
+                    const errorEl = document.getElementById('loginError');
+                    errorEl.innerText = "Accès refusé : rôle non reconnu pour cet e-mail.";
+                    errorEl.classList.remove('hidden');
+                    document.getElementById('authSection').classList.remove('hidden');
+                }
             } else {
                 document.getElementById('authSection').classList.remove('hidden');
+                document.getElementById('appContent').classList.add('hidden');
             }
         });
 
@@ -83,22 +102,35 @@
             else if (e.includes('relais') || e.includes('boutique')) userRole = 'relais';
             else if (e.includes('dispatch')) userRole = 'dispatch';
             else if (e.includes('livreur')) userRole = 'livreur';
+            else return false; // Rôle non trouvé
             
+            // Réinitialisation de l'affichage des sections
             document.querySelectorAll('.role-section').forEach(s => s.classList.add('hidden'));
             const badge = document.getElementById('badgeDisplay');
             const colors = { admin: 'bg-red-600', dispatch: 'bg-blue-600', relais: 'bg-emerald-600', livreur: 'bg-amber-600' };
             badge.innerHTML = `<span class="px-3 py-1 rounded-full text-[10px] font-black uppercase text-white ${colors[userRole] || 'bg-slate-500'}">${userRole}</span>`;
 
-            if (userRole === 'admin') document.querySelectorAll('.role-section').forEach(s => s.classList.remove('hidden'));
-            else if (userRole === 'relais') { document.getElementById('rubrique1').classList.remove('hidden'); document.getElementById('rubrique4').classList.remove('hidden'); }
-            else if (userRole === 'dispatch') { document.getElementById('rubrique2').classList.remove('hidden'); document.getElementById('rubrique4').classList.remove('hidden'); }
-            else if (userRole === 'livreur') { document.getElementById('rubrique3').classList.remove('hidden'); document.getElementById('statLivreurSection').classList.remove('hidden'); }
+            // Affichage selon le rôle
+            if (userRole === 'admin') {
+                document.querySelectorAll('.role-section').forEach(s => s.classList.remove('hidden'));
+            } else if (userRole === 'relais') { 
+                document.getElementById('rubrique1').classList.remove('hidden'); 
+                document.getElementById('rubrique4').classList.remove('hidden'); 
+            } else if (userRole === 'dispatch') { 
+                document.getElementById('rubrique2').classList.remove('hidden'); 
+                document.getElementById('rubrique4').classList.remove('hidden'); 
+            } else if (userRole === 'livreur') { 
+                document.getElementById('rubrique3').classList.remove('hidden'); 
+                document.getElementById('statLivreurSection').classList.remove('hidden'); 
+            }
+            return true;
         };
 
-        // --- MISSIONS ---
+        // --- MISSIONS LOGIQUE ---
         const prepareNextId = () => {
             window.nextId = "2026-" + Math.floor(Math.random() * 900000 + 100000);
-            document.getElementById('displayNextId').innerText = window.nextId;
+            const el = document.getElementById('displayNextId');
+            if(el) el.innerText = window.nextId;
         };
 
         window.genererMission = async () => {
@@ -127,365 +159,110 @@
             } catch (e) { showToast("Erreur création", "error"); }
         };
 
-        window.supprimerMission = async (id) => {
-            if (confirm("Supprimer cette mission ?")) {
-                await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'missions', id));
-                showToast("Mission supprimée", "success");
-            }
-        };
-
-        window.publierMission = async (id) => {
-            await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'missions', id), { s: 1 });
-            showToast("Mission publiée", "success");
-        };
-
-        window.toggleFilterToday = () => {
-            filterToday = !filterToday;
-            document.getElementById('btnFilterToday').className = filterToday ? "bg-yellow-500 text-slate-900 px-4 py-2 rounded-xl font-black text-[10px]" : "bg-slate-800 text-slate-400 px-4 py-2 rounded-xl font-black text-[10px]";
-            renderUI();
-        };
-
-        const calculateStats = () => {
-            const today = new Date().toISOString().split('T')[0];
-            const stats = { caTotal: 0, livraisonsTotal: 0, caJour: 0, livreurs: {} };
-            allMissions.forEach(m => {
-                if (m.s === 2) {
-                    stats.caTotal += m.p || 0;
-                    stats.livraisonsTotal++;
-                    if (m.lk === today) stats.caJour += m.p || 0;
-                    const l = m.le || 'Inconnu';
-                    if (!stats.livreurs[l]) stats.livreurs[l] = { count: 0, ca: 0, bonus: 0 };
-                    stats.livreurs[l].count++;
-                    stats.livreurs[l].ca += m.p || 0;
-                    if (stats.livreurs[l].count > 17) stats.livreurs[l].bonus += 700;
-                }
-            });
-            return stats;
-        };
-
         const startListeners = () => {
             onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'missions'), (snap) => {
                 allMissions = [];
                 snap.forEach(doc => allMissions.push(doc.data()));
                 renderUI();
                 renderStats();
-            });
+            }, (err) => console.error("Erreur Firestore:", err));
         };
 
         const renderStats = () => {
-            const stats = calculateStats();
+            const stats = { caTotal: 0, caJour: 0, livraisonsTotal: 0, livreurs: {} };
+            const today = new Date().toISOString().split('T')[0];
+
+            allMissions.forEach(m => {
+                if (m.s === 2) {
+                    stats.caTotal += m.p || 0;
+                    stats.livraisonsTotal++;
+                    if (m.lk === today) stats.caJour += m.p || 0;
+                    const l = m.le || 'Inconnu';
+                    if (!stats.livreurs[l]) stats.livreurs[l] = { count: 0, bonus: 0 };
+                    stats.livreurs[l].count++;
+                    if (stats.livreurs[l].count > 17) stats.livreurs[l].bonus += 700;
+                }
+            });
+
             if (userRole === 'admin') {
                 const caT = document.getElementById('dashCaTotal');
                 const caJ = document.getElementById('dashCaJour');
-                const livT = document.getElementById('dashLivTotal');
                 if(caT) caT.innerText = stats.caTotal.toLocaleString() + ' CFA';
                 if(caJ) caJ.innerText = stats.caJour.toLocaleString() + ' CFA';
-                if(livT) livT.innerText = stats.livraisonsTotal;
-                const list = document.getElementById('dashLivreursList');
-                if(list) {
-                   list.innerHTML = "";
-                   Object.entries(stats.livreurs).forEach(([email, data]) => {
-                       list.innerHTML += `<div class="flex justify-between p-3 bg-slate-800 rounded-xl mb-2 text-[10px]"><span class="text-white truncate w-32">${email}</span><span class="text-yellow-500 font-black">${data.count} missions</span><span class="text-emerald-500 font-black">+${data.bonus}</span></div>`;
-                   });
-                }
             }
             if (userRole === 'livreur') {
                 const my = stats.livreurs[currentUser.email] || { count: 0, bonus: 0 };
                 const mC = document.getElementById('myCount');
                 const mB = document.getElementById('myBonus');
-                const pB = document.getElementById('progBar');
                 if(mC) mC.innerText = my.count;
                 if(mB) mB.innerText = my.bonus + ' CFA';
-                if(pB) pB.style.width = Math.min((my.count / 17) * 100, 100) + '%';
             }
         };
 
         window.renderUI = () => {
-            const containers = { dispatch: document.getElementById('containerDispatch'), livreur: document.getElementById('containerLivreur'), archives: document.getElementById('archiveBody') };
-            Object.values(containers).forEach(c => { if(c) c.innerHTML = "" });
-            const today = new Date().toISOString().split('T')[0];
+            const contDisp = document.getElementById('containerDispatch');
+            const contLiv = document.getElementById('containerLivreur');
+            const contArch = document.getElementById('archiveBody');
+            if(contDisp) contDisp.innerHTML = "";
+            if(contLiv) contLiv.innerHTML = "";
+            if(contArch) contArch.innerHTML = "";
 
-            allMissions.sort((a,b) => (b.ca || 0) - (a.ca || 0)).forEach(m => {
-                if (filterToday && (m.lk !== today && m.cad !== today)) return;
-                const isMyColis = m.ce === currentUser.email;
-                const delBtn = userRole === 'admin' ? `<button onclick="supprimerMission('${m.id}')" class="p-2 text-red-400 bg-red-500/10 rounded-lg"><svg class="w-3 h-3" fill="currentColor" viewBox="0 0 24 24"><path d="M3 6h18v2H3V6m2 3h14v13c0 1.1-.9 2-2 2H7c-1.1 0-2-.9-2-2V9m3 3v8h2v-8H8m4 0v8h2v-8h-2m4 0v8h2v-8h-2Z"/></svg></button>` : '';
-
+            allMissions.forEach(m => {
                 if (m.s === 0 && (userRole === 'admin' || userRole === 'dispatch')) {
-                    if(containers.dispatch) {
-                        containers.dispatch.innerHTML += `
-                        <div class="p-4 bg-white border border-slate-100 rounded-2xl mb-3 shadow-sm flex justify-between items-center">
-                            <div class="text-[11px]"><span class="font-black text-blue-600 block">${m.id}</span><b>${m.dn}</b><br><span class="text-slate-400">${m.dq}</span></div>
-                            <div class="flex gap-2">
-                                ${delBtn}
-                                <button onclick="openBonImpression('${m.id}')" class="bg-slate-100 text-slate-600 text-[9px] px-3 py-2 rounded-xl font-bold uppercase">Bon d'impression</button>
-                                <button onclick="publierMission('${m.id}')" class="bg-blue-600 text-white text-[10px] px-5 py-2 rounded-xl font-bold uppercase">Expédier</button>
-                            </div>
+                    if(contDisp) contDisp.innerHTML += `
+                        <div class="p-4 bg-white border border-slate-100 rounded-2xl mb-3 flex justify-between items-center">
+                            <div class="text-[11px] font-bold"><span>${m.id}</span><br>${m.dn} (${m.dq})</div>
+                            <button onclick="publierMission('${m.id}')" class="bg-blue-600 text-white px-4 py-2 rounded-xl text-[10px] font-black">EXPÉDIER</button>
                         </div>`;
-                    }
                 } else if (m.s === 1 && (userRole === 'admin' || userRole === 'livreur')) {
-                    if(containers.livreur) {
-                        containers.livreur.innerHTML += `
-                        <div class="p-5 bg-amber-50 border border-amber-200 rounded-3xl mb-4 space-y-3">
-                            <div class="flex justify-between font-black text-amber-700"><span>${m.id}</span><span class="text-[9px] uppercase">En cours</span></div>
-                            <p class="text-[11px] text-amber-900"><b>Lieu:</b> ${m.dq}<br><b>Contact:</b> ${m.dn} (${m.dt})</p>
-                            <div class="flex flex-col gap-2">
-                                 <button onclick="openQrScanner()" class="w-full bg-slate-900 text-white font-black py-4 rounded-2xl shadow-lg flex items-center justify-center gap-2">
-                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h3m-3 3h3m5 1.412V17a1 1 0 01-1 1h-2.586l-2.828 2.828A1 1 0 0110 20.414V18H7a1 1 0 01-1-1v-2.586l-2.828-2.828A1 1 0 013.586 10H6V7a1 1 0 011-1h2.586l2.828-2.828A1 1 0 0114 3.586V6h3a1 1 0 011 1v2.586l2.828 2.828z" /></svg>
-                                    SCANNER POUR LIVRER
-                                 </button>
-                                 <div class="flex gap-2">
-                                     <button onclick="openBonImpression('${m.id}')" class="flex-1 bg-white border border-amber-200 text-amber-700 font-black py-3 rounded-2xl text-[10px]">VOIR BON</button>
-                                     <button onclick="openCamera('${m.id}')" class="flex-1 bg-amber-200 text-amber-800 font-black py-3 rounded-2xl text-[10px]">FORCE LIVRER</button>
-                                 </div>
-                            </div>
+                    if(contLiv) contLiv.innerHTML += `
+                        <div class="p-5 bg-amber-50 border border-amber-200 rounded-3xl mb-4">
+                            <div class="flex justify-between font-black mb-2"><span>${m.id}</span><span class="text-amber-600 text-[9px]">EN COURS</span></div>
+                            <p class="text-[11px] mb-4">${m.dn} - ${m.dq}<br>Tél: ${m.dt}</p>
+                            <button onclick="openQrScanner()" class="w-full bg-slate-900 text-white py-4 rounded-2xl font-black text-[10px]">SCANNER QR POUR LIVRER</button>
                         </div>`;
-                    }
-                }
-
-                if ((userRole === 'admin' || userRole === 'dispatch' || (userRole === 'relais' && isMyColis)) && m.s === 2) {
-                    if (containers.archives && (!searchQuery || m.id.toLowerCase().includes(searchQuery) || m.dn.toLowerCase().includes(searchQuery))) {
-                        containers.archives.innerHTML += `
-                        <tr class="border-b border-slate-800 text-[10px] hover:bg-slate-800 transition">
-                            <td onclick="openArchiveDetail('${m.id}')" class="p-4 font-bold text-white">${m.id}</td>
-                            <td onclick="openArchiveDetail('${m.id}')" class="p-4 text-slate-300"><b>${m.dn}</b><br><span class="text-[8px] text-slate-500">${m.lk}</span></td>
-                            <td class="p-4 text-center">${delBtn}</td>
-                            <td class="p-4 text-right text-emerald-400 font-black">${(m.p || 0).toLocaleString()}</td>
-                        </tr>`;
-                    }
+                } else if (m.s === 2 && (userRole === 'admin' || userRole === 'dispatch')) {
+                    if(contArch) contArch.innerHTML += `<tr class="border-b border-slate-800 text-[10px]"><td class="p-4 font-bold text-white">${m.id}</td><td class="p-4 text-slate-300">${m.dn}</td><td class="p-4 text-right text-emerald-400 font-black">${m.p}</td></tr>`;
                 }
             });
-            const aC = document.getElementById('archiveCount');
-            if(aC && containers.archives) aC.innerText = containers.archives.children.length;
         };
 
-        // --- CAMERA & PHOTO ---
-        window.openCamera = (id) => { currentMissionId = id; document.getElementById('cameraModal').classList.remove('hidden'); };
-        window.processImage = (file) => {
-            const reader = new FileReader();
-            reader.onload = (e) => {
-                const img = new Image();
-                img.onload = () => {
-                    const canvas = document.createElement('canvas');
-                    canvas.width = 600; canvas.height = img.height * (600 / img.width);
-                    canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
-                    finalizeDelivery(canvas.toDataURL('image/jpeg', 0.6));
-                };
-                img.src = e.target.result;
-            };
-            reader.readAsDataURL(file);
+        window.publierMission = async (id) => {
+            await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'missions', id), { s: 1 });
+            showToast("Mission envoyée aux livreurs", "success");
         };
 
-        const finalizeDelivery = async (photo = null) => {
-            if(!currentMissionId) return;
-            const dataUpdate = { 
-                s: 2, 
-                le: currentUser.email, 
-                lk: new Date().toISOString().split('T')[0] 
-            };
-            if(photo) dataUpdate.img = photo;
-            
-            await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'missions', currentMissionId), dataUpdate);
-            document.getElementById('cameraModal').classList.add('hidden');
-            showToast("Livraison Validée !", "success");
-            currentMissionId = null;
-        };
-
-        // --- QR SCANNER LOGIQUE ---
+        // --- QR SCANNER ---
         let html5QrCode = null;
         window.openQrScanner = () => {
             document.getElementById('qrScannerModal').classList.remove('hidden');
             html5QrCode = new Html5Qrcode("reader");
-            const config = { fps: 10, qrbox: { width: 250, height: 250 } };
-            html5QrCode.start({ facingMode: "environment" }, config, (decodedText) => {
-                handleQrResult(decodedText);
-            }).catch(() => {
-                showToast("Erreur caméra", "error");
-                closeQrScanner();
-            });
+            html5QrCode.start({ facingMode: "environment" }, { fps: 10, qrbox: 250 }, (text) => {
+                const missionId = text.replace('CT241-', '');
+                validateMission(missionId);
+            }).catch(e => console.error(e));
         };
 
-        window.closeQrScanner = () => {
-            if(html5QrCode) {
-                html5QrCode.stop().then(() => {
-                    document.getElementById('qrScannerModal').classList.add('hidden');
-                }).catch(() => {
-                    document.getElementById('qrScannerModal').classList.add('hidden');
-                });
-            } else {
-                document.getElementById('qrScannerModal').classList.add('hidden');
-            }
-        };
-
-        const handleQrResult = (text) => {
-            const cleanId = text.replace('CT241-', '');
-            const m = allMissions.find(x => x.id === cleanId);
+        const validateMission = async (id) => {
+            const m = allMissions.find(x => x.id === id);
             if(m && m.s === 1) {
-                currentMissionId = m.id;
-                closeQrScanner();
-                finalizeDelivery();
+                await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'missions', id), {
+                    s: 2, le: currentUser.email, lk: new Date().toISOString().split('T')[0]
+                });
+                if(html5QrCode) html5QrCode.stop();
+                document.getElementById('qrScannerModal').classList.add('hidden');
+                showToast("Livraison validée !", "success");
             } else {
-                showToast("QR Code Invalide", "error");
+                showToast("QR Invalide ou déjà livré", "error");
             }
         };
 
-        window.handleSearch = (v) => { searchQuery = v.toLowerCase(); renderUI(); };
-        const showToast = (m, t) => {
+        window.showToast = (m, t) => {
             const el = document.getElementById('toast');
-            el.innerText = m; el.className = `fixed bottom-10 left-1/2 -translate-x-1/2 px-6 py-3 rounded-full text-white font-bold text-xs shadow-2xl z-[500] ${t==='success'?'bg-emerald-600':'bg-red-600'}`;
-            el.classList.remove('hidden'); setTimeout(() => el.classList.add('hidden'), 3000);
-        };
-
-        // --- BON D'IMPRESSION AVEC QR CODE ---
-        window.openBonImpression = (id) => {
-            const m = allMissions.find(x => x.id === id);
-            const natureMap = ["Standard", "Repas", "Documents", "Pharma"];
-            const modeMap = ["Espèces", "Airtel Money", "Moov Money"];
-            
-            document.getElementById('detailContent').innerHTML = `
-                <div class="print-area bg-white p-6 md:p-12 text-slate-900 min-h-screen flex flex-col">
-                    <div class="flex justify-between items-start mb-8 pb-8 border-b-2 border-slate-100">
-                        <div class="flex items-center gap-4">
-                            <div class="w-16 h-16 bg-slate-900 rounded-2xl flex items-center justify-center">
-                                <img src="https://i.ibb.co/q3t8t3Rj/Gemini-Generated-Image-1pvtp31pvtp31pvt.png" class="w-12 filter invert">
-                            </div>
-                            <div>
-                                <h1 class="text-3xl font-black tracking-tighter text-slate-900 leading-none">CT241</h1>
-                                <p class="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-400 mt-1">Logistics & Performance</p>
-                                <div class="mt-2 space-y-0.5 text-[9px] font-semibold text-slate-500">
-                                    <p>BP 12450 • Zone Industrielle Oloumi</p>
-                                    <p>Libreville, Gabon • Tél: +241 077 73 60 65</p>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="text-right">
-                            <h2 class="text-xl font-black uppercase text-slate-900">Bon de Livraison</h2>
-                            <div class="inline-block bg-slate-100 px-3 py-1 rounded-lg mt-2">
-                                <span class="text-[10px] font-black text-slate-500 uppercase">Référence :</span>
-                                <span class="text-[11px] font-black text-slate-900">${m.id}</span>
-                            </div>
-                            <p class="text-[10px] text-slate-400 font-bold mt-2">Date : ${new Date(m.ca).toLocaleDateString('fr-FR')}</p>
-                        </div>
-                    </div>
-
-                    <div class="grid grid-cols-2 gap-12 mb-12">
-                        <div class="relative">
-                            <div class="absolute -left-4 top-0 bottom-0 w-1 bg-emerald-500 rounded-full"></div>
-                            <h3 class="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-4">Expéditeur / Origine</h3>
-                            <div class="space-y-1">
-                                <p class="text-sm font-black text-slate-900 uppercase">${m.en}</p>
-                                <p class="text-[11px] font-medium text-slate-600">${m.eq}</p>
-                                <p class="text-[11px] font-bold text-slate-900 mt-2">Contact: ${m.et}</p>
-                            </div>
-                        </div>
-                        <div class="relative">
-                            <div class="absolute -left-4 top-0 bottom-0 w-1 bg-blue-600 rounded-full"></div>
-                            <h3 class="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-4">Destinataire / Destination</h3>
-                            <div class="space-y-1">
-                                <p class="text-sm font-black text-slate-900 uppercase">${m.dn}</p>
-                                <p class="text-[11px] font-medium text-slate-600">${m.dq}</p>
-                                <p class="text-[11px] font-bold text-slate-900 mt-2">Contact: ${m.dt}</p>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="flex-grow">
-                        <table class="w-full text-left mb-8 border-collapse">
-                            <thead>
-                                <tr class="bg-slate-50 border-y border-slate-100">
-                                    <th class="py-4 px-4 text-[10px] font-black uppercase text-slate-400 tracking-widest">Marchandise</th>
-                                    <th class="py-4 px-4 text-[10px] font-black uppercase text-slate-400 tracking-widest text-right">Valeur Déclarée</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <tr>
-                                    <td class="py-6 px-4">
-                                        <p class="text-sm font-black text-slate-900">Envoi Standard (${natureMap[m.n]})</p>
-                                        <p class="text-[10px] text-slate-400 mt-1">Colis scellé CT241</p>
-                                    </td>
-                                    <td class="py-6 px-4 text-right">
-                                        <p class="text-sm font-black text-slate-900">${m.v.toLocaleString()} CFA</p>
-                                    </td>
-                                </tr>
-                            </tbody>
-                        </table>
-
-                        <div class="flex justify-between items-center mb-12">
-                            <div id="qrcode" class="p-2 border-2 border-slate-100 rounded-2xl"></div>
-                            <div class="w-72 space-y-3">
-                                <div class="flex justify-between items-center text-[10px] font-bold text-slate-500 uppercase">
-                                    <span>Frais de service</span>
-                                    <span>${m.p.toLocaleString()} CFA</span>
-                                </div>
-                                <div class="flex justify-between items-center text-[10px] font-bold text-slate-500 uppercase">
-                                    <span>Mode</span>
-                                    <span class="text-slate-900">${modeMap[m.r]}</span>
-                                </div>
-                                <div class="h-px bg-slate-200 my-2"></div>
-                                <div class="flex justify-between items-center">
-                                    <span class="text-xs font-black uppercase text-slate-900">À Payer</span>
-                                    <span class="text-2xl font-black text-slate-900">${m.p.toLocaleString()} CFA</span>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="grid grid-cols-3 gap-6 mb-12 pt-12 border-t border-slate-100">
-                        <div class="space-y-4">
-                            <h4 class="text-[9px] font-black uppercase tracking-tighter text-slate-400">Signature Expéditeur</h4>
-                            <div class="h-20 border border-dashed border-slate-200 rounded-2xl"></div>
-                        </div>
-                        <div class="space-y-4">
-                            <h4 class="text-[9px] font-black uppercase tracking-tighter text-slate-400">Livreur</h4>
-                            <div class="h-20 border border-dashed border-slate-200 rounded-2xl"></div>
-                        </div>
-                        <div class="space-y-4">
-                            <h4 class="text-[9px] font-black uppercase tracking-tighter text-slate-900">Réception Client</h4>
-                            <div class="h-20 bg-slate-50 border-2 border-slate-900 rounded-2xl"></div>
-                        </div>
-                    </div>
-
-                    <div class="text-center text-[7px] text-slate-400 uppercase font-bold tracking-[0.3em]">
-                        Le scan de ce bon est obligatoire pour valider la livraison
-                    </div>
-                </div>`;
-            document.getElementById('detailModal').classList.remove('hidden');
-            
-            // Génération asynchrone du QR Code
-            setTimeout(() => {
-                new QRCode(document.getElementById("qrcode"), {
-                    text: "CT241-" + m.id,
-                    width: 100,
-                    height: 100,
-                    colorDark : "#0f172a",
-                    colorLight : "#ffffff",
-                    correctLevel : QRCode.CorrectLevel.H
-                });
-            }, 100);
-        };
-
-        window.openArchiveDetail = (id) => {
-            const m = allMissions.find(x => x.id === id);
-            document.getElementById('detailContent').innerHTML = `
-                <div class="bg-white p-6 space-y-4">
-                    <div class="flex justify-between items-center pb-4 border-b border-slate-100">
-                        <h2 class="text-xl font-black">Preuve : ${m.id}</h2>
-                        <span class="bg-emerald-100 text-emerald-700 px-3 py-1 rounded-full font-black text-[10px]">LIVRÉ</span>
-                    </div>
-                    ${m.img ? `<img src="${m.img}" class="w-full rounded-3xl shadow-lg">` : '<div class="h-40 bg-slate-100 flex items-center justify-center italic text-slate-400 rounded-3xl text-sm">Validé par QR Code / Sans Photo</div>'}
-                    <div class="grid grid-cols-2 gap-4 text-[11px]">
-                        <div class="bg-slate-50 p-4 rounded-2xl">
-                            <p class="text-slate-500 font-bold uppercase mb-1">Destinataire</p>
-                            <p class="font-black text-slate-900">${m.dn}</p>
-                            <p>${m.dq}</p>
-                        </div>
-                        <div class="bg-slate-50 p-4 rounded-2xl">
-                            <p class="text-slate-500 font-bold uppercase mb-1">Agent Livreur</p>
-                            <p class="font-black text-slate-900">${m.le || 'Inconnu'}</p>
-                            <p>Le : ${m.lk || '...'}</p>
-                        </div>
-                    </div>
-                </div>`;
-            document.getElementById('detailModal').classList.remove('hidden');
+            el.innerText = m;
+            el.className = `fixed bottom-10 left-1/2 -translate-x-1/2 px-6 py-3 rounded-full text-white font-bold text-xs z-[600] ${t==='success'?'bg-emerald-600':'bg-red-600'}`;
+            el.classList.remove('hidden');
+            setTimeout(() => el.classList.add('hidden'), 3000);
         };
 
     </script>
@@ -493,12 +270,6 @@
         @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800&display=swap');
         body { font-family: 'Plus Jakarta Sans', sans-serif; background-color: #f8fafc; }
         .hidden { display: none; }
-        @media print { 
-            body * { visibility: hidden; } 
-            .print-area, .print-area * { visibility: visible; } 
-            .print-area { position: absolute; left: 0; top: 0; width: 100%; border: none !important; } 
-            .no-print { display: none !important; }
-        }
     </style>
 </head>
 <body class="min-h-screen">
@@ -508,141 +279,76 @@
     <!-- AUTHENTICATION -->
     <section id="authSection" class="fixed inset-0 bg-slate-900 flex items-center justify-center p-6 z-[200]">
         <div class="w-full max-w-sm bg-white rounded-[3rem] p-10 space-y-8 shadow-2xl text-center">
-            <img src="https://i.ibb.co/q3t8t3Rj/Gemini-Generated-Image-1pvtp31pvtp31pvt.png" class="h-24 mx-auto">
-            <h1 class="text-2xl font-black text-slate-900 uppercase">Portail CT241</h1>
+            <img src="https://i.ibb.co/q3t8t3Rj/Gemini-Generated-Image-1pvtp31pvtp31pvt.png" class="h-20 mx-auto">
+            <h1 class="text-xl font-black text-slate-900 uppercase">Connexion CT241</h1>
             <form onsubmit="handleLogin(event)" class="space-y-4">
-                <input type="email" id="loginEmail" required class="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl font-bold text-xs" placeholder="E-mail">
+                <input type="email" id="loginEmail" required class="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl font-bold text-xs" placeholder="E-mail (ex: livreur1@ct241.com)">
                 <input type="password" id="loginPass" required class="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl font-bold text-xs" placeholder="Mot de passe">
-                <p id="loginError" class="text-[10px] text-red-500 font-bold hidden">Identifiants incorrects.</p>
-                <button id="loginBtn" type="submit" class="w-full bg-slate-900 text-white font-black py-4 rounded-2xl shadow-xl hover:bg-black transition-colors">ACCÉDER AU PORTAIL</button>
+                <p id="loginError" class="text-[10px] text-red-500 font-bold hidden"></p>
+                <button id="loginBtn" type="submit" class="w-full bg-slate-900 text-white font-black py-4 rounded-2xl shadow-xl hover:bg-black transition-colors">SE CONNECTER</button>
             </form>
+            <p class="text-[9px] text-slate-400 uppercase font-bold">L'e-mail doit contenir "livreur", "admin", "relais" ou "dispatch".</p>
         </div>
     </section>
 
-    <!-- APP MAIN CONTENT -->
+    <!-- APP CONTENT -->
     <main id="appContent" class="hidden pb-24">
-        <nav class="bg-white/90 backdrop-blur-md p-4 sticky top-0 z-50 border-b border-slate-100">
+        <nav class="bg-white p-4 sticky top-0 z-50 border-b border-slate-100">
             <div class="max-w-xl mx-auto flex justify-between items-center">
                 <div class="flex items-center gap-3">
-                    <img src="https://i.ibb.co/q3t8t3Rj/Gemini-Generated-Image-1pvtp31pvtp31pvt.png" class="h-8">
                     <div class="flex flex-col"><span class="text-[9px] font-black text-slate-900" id="userDisplayEmail">...</span><div id="badgeDisplay"></div></div>
                 </div>
-                <div class="flex gap-2">
-                    <button onclick="toggleFilterToday()" id="btnFilterToday" class="bg-slate-100 text-slate-400 px-4 py-2 rounded-xl font-black text-[10px] uppercase">Aujourd'hui</button>
-                    <button onclick="handleLogout()" class="p-2 bg-slate-100 rounded-full text-slate-400 hover:text-red-500"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7" /></svg></button>
-                </div>
+                <button onclick="handleLogout()" class="p-2 bg-slate-100 rounded-full text-slate-400 hover:text-red-500"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7" /></svg></button>
             </div>
         </nav>
 
         <div class="max-w-xl mx-auto p-4 space-y-6">
-            <!-- DASHBOARD ADMIN -->
-            <section id="adminDash" class="role-section hidden space-y-4">
-                <div class="grid grid-cols-3 gap-3">
-                    <div class="bg-white p-4 rounded-3xl shadow-sm border border-slate-100 text-center"><span class="text-[8px] font-black text-slate-400 uppercase">CA Total</span><div id="dashCaTotal" class="text-[11px] font-black text-slate-900">0</div></div>
-                    <div class="bg-white p-4 rounded-3xl shadow-sm border border-slate-100 text-center"><span class="text-[8px] font-black text-slate-400 uppercase">CA Jour</span><div id="dashCaJour" class="text-[11px] font-black text-emerald-600">0</div></div>
-                    <div class="bg-white p-4 rounded-3xl shadow-sm border border-slate-100 text-center"><span class="text-[8px] font-black text-slate-400 uppercase">Livrées</span><div id="dashLivTotal" class="text-[11px] font-black text-blue-600">0</div></div>
-                </div>
-                <div class="bg-slate-900 p-5 rounded-[2rem] space-y-2 shadow-2xl" id="dashLivreursList"></div>
+            <!-- Stats Livreur -->
+            <section id="statLivreurSection" class="role-section hidden grid grid-cols-2 gap-3">
+                <div class="bg-white p-4 rounded-3xl border border-slate-100"><span class="text-[8px] font-black text-slate-400 uppercase">Livraisons</span><div id="myCount" class="text-xl font-black">0</div></div>
+                <div class="bg-white p-4 rounded-3xl border border-slate-100"><span class="text-[8px] font-black text-slate-400 uppercase">Bonus</span><div id="myBonus" class="text-xl font-black text-emerald-600">0</div></div>
             </section>
 
-            <!-- CRÉATION BORDEREAU -->
+            <!-- Création (Relais / Admin) -->
             <section id="rubrique1" class="role-section hidden">
-                <div class="bg-white rounded-[2.5rem] shadow-xl border border-slate-100 overflow-hidden">
-                    <div class="bg-slate-900 p-6 text-white flex justify-between items-center">
-                        <div><p class="text-[9px] font-black uppercase opacity-50 tracking-widest">Nouveau Bordereau</p><h2 class="font-black text-sm">Réf : <span id="displayNextId">...</span></h2></div>
-                        <div class="w-10 h-10 bg-white/10 rounded-xl flex items-center justify-center text-xl">✍️</div>
+                <div class="bg-white rounded-[2.5rem] shadow-xl p-6 space-y-4 border border-slate-100">
+                    <h2 class="font-black text-sm uppercase">Nouveau Bordereau <span id="displayNextId" class="text-blue-600">...</span></h2>
+                    <input type="text" id="expNom" placeholder="Nom Boutique" class="w-full p-4 bg-slate-50 rounded-2xl font-bold text-[11px] outline-none">
+                    <div class="grid grid-cols-2 gap-3">
+                        <input type="text" id="expQuartier" placeholder="Quartier" class="p-4 bg-slate-50 rounded-2xl font-bold text-[11px] outline-none">
+                        <input type="tel" id="expTel" placeholder="Tél" class="p-4 bg-slate-50 rounded-2xl font-bold text-[11px] outline-none">
                     </div>
-                    <div class="p-6 space-y-4">
-                        <input type="text" id="expNom" placeholder="Nom Boutique / Expéditeur" class="w-full p-4 bg-slate-50 rounded-2xl font-bold text-[11px] outline-none">
-                        <div class="grid grid-cols-2 gap-3">
-                            <input type="text" id="expQuartier" placeholder="Quartier" class="p-4 bg-slate-50 rounded-2xl font-bold text-[11px] outline-none">
-                            <input type="tel" id="expTel" placeholder="Tél Expéditeur" class="p-4 bg-slate-50 rounded-2xl font-bold text-[11px] outline-none">
-                        </div>
-                        <div class="h-px bg-slate-100 my-2"></div>
-                        <input type="text" id="destNom" placeholder="Nom complet du client" class="w-full p-4 bg-slate-50 rounded-2xl font-bold text-[11px] outline-none border-2 border-transparent focus:border-blue-600 transition-all">
-                        <div class="grid grid-cols-2 gap-3">
-                            <select id="destQuartier" class="p-4 bg-slate-50 rounded-2xl font-bold text-[11px] outline-none">
-                                <option value="" disabled selected>Choisir la Zone</option>
-                                <option>Angondjé</option><option>Nzeng-Ayong</option><option>Oloumi</option><option>Akanda</option><option>Owendo</option><option>Pk0-12s</option><option>Glass</option>
-                            </select>
-                            <input type="tel" id="destTel" placeholder="Tél du client" class="p-4 bg-slate-50 rounded-2xl font-bold text-[11px] outline-none">
-                        </div>
-                        <div class="grid grid-cols-2 gap-3">
-                            <select id="natureColis" class="p-4 bg-slate-900 text-white rounded-2xl font-black text-[10px] outline-none">
-                                <option value="0">📦 Envoi Standard</option><option value="1">🍟 Repas / Frais</option><option value="2">📁 Courrier / Doc</option><option value="3">💊 Pharmacie</option>
-                            </select>
-                            <select id="modeReglement" class="p-4 bg-slate-100 rounded-2xl font-black text-[10px] outline-none">
-                                <option value="0">Espèces</option><option value="1">Airtel Money</option><option value="2">Moov Money</option>
-                            </select>
-                        </div>
-                        <div class="grid grid-cols-2 gap-3">
-                            <input type="number" id="valeurDeclaree" placeholder="Valeur" class="p-4 bg-slate-50 rounded-2xl font-bold text-[11px] outline-none">
-                            <input type="number" id="fraisLivraison" placeholder="PRIX LIVRAISON" class="p-4 bg-blue-600 text-white rounded-2xl font-black text-[11px] outline-none placeholder:text-blue-200">
-                        </div>
-                        <button onclick="genererMission()" class="w-full bg-slate-900 text-white font-black py-5 rounded-3xl shadow-xl hover:bg-black transition-all text-[11px] uppercase tracking-[0.2em]">Enregistrer & Créer QR</button>
+                    <hr class="border-slate-50">
+                    <input type="text" id="destNom" placeholder="Destinataire" class="w-full p-4 bg-slate-50 rounded-2xl font-bold text-[11px] outline-none">
+                    <div class="grid grid-cols-2 gap-3">
+                        <input type="text" id="dq" placeholder="Quartier Destination" class="p-4 bg-slate-50 rounded-2xl font-bold text-[11px] outline-none">
+                        <input type="tel" id="dt" placeholder="Tél Client" class="p-4 bg-slate-50 rounded-2xl font-bold text-[11px] outline-none">
                     </div>
+                    <div class="grid grid-cols-2 gap-3">
+                        <select id="natureColis" class="p-4 bg-slate-900 text-white rounded-2xl font-black text-[10px]"><option value="0">📦 Standard</option></select>
+                        <input type="number" id="fraisLivraison" placeholder="PRIX LIVRAISON" class="p-4 bg-blue-600 text-white rounded-2xl font-black text-[11px] outline-none placeholder:text-blue-200">
+                    </div>
+                    <button onclick="genererMission()" class="w-full bg-slate-900 text-white font-black py-5 rounded-3xl text-[11px] uppercase tracking-widest">Enregistrer</button>
                 </div>
             </section>
 
             <section id="rubrique2" class="role-section hidden">
-                <h3 class="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4 ml-2">Dispatching (Attente)</h3>
+                <h3 class="text-[10px] font-black text-slate-400 uppercase mb-4">Dispatching</h3>
                 <div id="containerDispatch"></div>
             </section>
 
             <section id="rubrique3" class="role-section hidden">
-                <h3 class="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4 ml-2">Missions Actives</h3>
+                <h3 class="text-[10px] font-black text-slate-400 uppercase mb-4">Mes Livraisons</h3>
                 <div id="containerLivreur"></div>
-            </section>
-
-            <section id="rubrique4" class="role-section hidden">
-                <div class="bg-white rounded-[2.5rem] overflow-hidden shadow-xl border border-slate-100">
-                    <div class="p-6 border-b border-slate-50">
-                        <div class="flex justify-between items-center mb-6">
-                            <h2 class="text-slate-900 font-black text-xs uppercase tracking-tight">Archives Numériques</h2>
-                            <div id="archiveCount" class="bg-slate-900 text-white font-black text-[9px] px-3 py-1 rounded-full">0</div>
-                        </div>
-                        <input type="text" oninput="handleSearch(this.value)" placeholder="Rechercher..." class="w-full p-4 bg-slate-50 rounded-2xl text-[11px] font-bold outline-none">
-                    </div>
-                    <div class="overflow-x-auto">
-                        <table class="w-full text-left">
-                            <tbody id="archiveBody"></tbody>
-                        </table>
-                    </div>
-                </div>
             </section>
         </div>
     </main>
 
-    <!-- MODAL DÉTAILS / PRINT -->
-    <div id="detailModal" class="fixed inset-0 bg-slate-950/95 z-[400] hidden flex items-center justify-center p-0 md:p-8">
-        <div class="w-full max-w-4xl bg-white md:rounded-[3rem] overflow-y-auto max-h-screen md:max-h-[95vh] shadow-2xl">
-            <div id="detailContent"></div>
-            <div class="p-8 bg-slate-50 flex gap-3 no-print border-t border-slate-100 sticky bottom-0">
-                <button onclick="window.print()" class="flex-1 bg-slate-900 text-white font-black py-5 rounded-3xl text-[11px] uppercase tracking-widest">🖨️ Imprimer le Bordereau</button>
-                <button onclick="document.getElementById('detailModal').classList.add('hidden')" class="px-10 bg-white border border-slate-200 text-slate-500 font-black py-5 rounded-3xl text-[11px] uppercase tracking-widest">Fermer</button>
-            </div>
-        </div>
-    </div>
-
-    <!-- MODAL SCANNER QR -->
+    <!-- SCANNER MODAL -->
     <div id="qrScannerModal" class="fixed inset-0 bg-black z-[500] hidden flex flex-col items-center justify-center p-6 text-white">
-        <div class="w-full max-w-md bg-white/10 backdrop-blur-xl rounded-[3rem] p-8 space-y-6">
-            <h2 class="text-xl font-black text-center uppercase tracking-widest">Scan de Validation</h2>
-            <div id="reader" class="rounded-3xl overflow-hidden bg-black aspect-square border-4 border-white/20"></div>
-            <button onclick="closeQrScanner()" class="w-full bg-red-600 text-white font-black py-4 rounded-2xl uppercase text-[10px]">Annuler le Scan</button>
-        </div>
-    </div>
-
-    <!-- MODAL PHOTO PREUVE -->
-    <div id="cameraModal" class="fixed inset-0 bg-black z-[300] hidden flex flex-col items-center justify-center p-8 text-white">
-        <div class="text-center space-y-8 max-w-xs">
-            <div class="w-24 h-24 bg-white/10 rounded-full flex items-center justify-center text-5xl mx-auto">📸</div>
-            <h2 class="text-2xl font-black">Preuve de Livraison</h2>
-            <p class="text-slate-500 text-xs italic">Optionnel : Si le scan QR est impossible, prenez une photo de la signature client.</p>
-            <input type="file" id="fileInput" accept="image/*" capture="camera" class="hidden" onchange="processImage(this.files[0])">
-            <button onclick="document.getElementById('fileInput').click()" class="w-full bg-white text-black font-black py-5 rounded-3xl shadow-2xl uppercase text-[11px] tracking-widest">Appareil Photo</button>
-            <button onclick="document.getElementById('cameraModal').classList.add('hidden')" class="text-slate-600 text-[10px] font-bold underline">Retour</button>
-        </div>
+        <h2 class="text-xl font-black mb-4 uppercase">Scanner le bordereau</h2>
+        <div id="reader" class="w-full max-w-sm rounded-3xl overflow-hidden border-2 border-white/20"></div>
+        <button onclick="document.getElementById('qrScannerModal').classList.add('hidden')" class="mt-8 bg-red-600 px-10 py-4 rounded-2xl font-black text-[10px]">FERMER</button>
     </div>
 
 </body>
